@@ -3,9 +3,9 @@
     "baudrate": 115200,
     "bss_firmware": "rf_eval_firmware\\radarss\\xwr29xx_radarss_rprc.bin",
     "mss_firmware": "rf_eval_firmware\\masterss\\awr2xxx_mmwave_full_mss_rprc.bin",
-    "tmpfile": "D:\\rawData\\test\\tmp.bin",
+    "tmpfile": "..\\rawData\\test\\tmp.bin",
     "mmwave_studio": "C:\\ti\\mmwave_studio_03_01_04_04",
-    "msgfile": "D:\\rawData\\test\\msg",
+    "msgfile": "..\\rawData\\test\\msg",
     "static_ip": "192.168.33.30",
     "data_port": 4098,
     "config_port": 4096
