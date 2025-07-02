@@ -11,5 +11,7 @@
 *.zip
 *.h5
 *.pyc
-*/rover-main
 */radical-main
+*/rover-main/rover-main/docs
+*/rover-main/rover-main/lidar
+*/rover-main/rover-main/processing
