@@ -1,0 +1,175 @@
+1. Void RSTD.doFileRelative(String file_name)                                    -  Set working directory to the current dofile directory 
+2. LuaTable RSTD.SubsetGet(Int32 handle)                                         -  Get SubSet
+3. String RSTD.RunFunction(String funcCall)                                      -  Runs the function that resides in the given tree path. Returns the function’s return value.
+4. Void RSTD.ExitRstd()                                                          -  Exits Rstd.
+5. Void RSTD.WatchDogStartAu(UInt32 timeout, String cmd_to_run, String control_file_name)            -  Opens WatchDog
+6. Int64 RSTD.MemoryAllocated()                                                  -  Get the amount of memory currently allocated to this RSTD process (in KB)
+7. Int32,Int32& RSTD.GetMainWindowSize()                                         -  Returns the Main window's size (width, height)
+8. Void RSTD.SubsetReceive(Int32 handle)                                         -  Receive SubSet
+9. Void RSTD.SetExternalAL(String dll_path)                                      -  Set registered DLL as Abstraction Layer (for handling Receive/Transmit operations)
+10. Void RSTD.SetClientDll(String al_client_path, String client_path, String gui_dll_path, UInt32 client_number)                                   -  Activates the wanted client
+11. Void RSTD.Go()                                                               -  Begins the simulation (Calls the client’s Apply method)
+12. Void RSTD.SetTitle(String title)                                             -  Sets the title of the main form
+13. Int32 RSTD.GetPID()                                                          -  Get RSTD PID in Running Processes
+14. Void RSTD.ClearRegisteredDlls()                                              -  Clear all registered Dll to Lua
+15. Void RSTD.SubsetRemove(Int32 handle, String path)                            -  Remove register from subset
+16. Void RSTD.SetAndTransmit(String varFullPath, String newValue)                -  Calls both SetVar and Transmit (in that order) for a given variable.
+17. Void RSTD.HideBrowseTree()                                                   -  Hides the BrowseTree.
+18. Void RSTD.LoadExpose(String fileName)                                        -  Loads the given exposed xml file into the BrowseTree.
+19. UInt32 RSTD.bitWiseAnd(UInt32 frtNum, UInt32 scndNum)                        -  bitWise And
+20. Void RSTD.MessageColor(String text, UInt32 text_color)                       -  Writes the text in the Rstd console in specified color
+21. Void RSTD.RemoveFromMonitor(String path)                                     -  Remove the node which resides in the given path from monitor
+22. Void RSTD.TimerStart(Int32 time, String script)                              -  Start the timer which will trigger when the time has elapsed, stopping the current script and running the provided script.
+23. Void RSTD.MonitorHide()                                                      -  Opens the Monitor form.
+24. String RSTD.GetSettingsPath()                                                -  Get the directory where the RSTD settings resides
+25. String RSTD.GetAttribute(String varFullPath, String attr_str)                -  Gets the attribute value of given var
+26. Void RSTD.SleepUntilStop()                                                   -  Executable main thread sleeps until RstdStopRunning() is called by client.
+27. Void RSTD.MessageBox(String message, Boolean isModal)                        -  Writes the message in a GUI MessageBox
+28. Void RSTD.ParseFile(String file_name)                                        -  Parsing block comments in a file to get function description
+29. Void RSTD.NetReset_Port(Int32 port)                                          -  Reset an RT3 Net Server
+30. Void RSTD.PlotClear()                                                        -  Inactive all series from all charts
+31. Void RSTD.LoadConfig(String fileName)                                        -  Loads the Rstd Settings (the first BrowseTree tab) from the given file. (settings are saved/loaded by default in the config.xml file which resides in the same directory as Rstd.exe)
+32. Void RSTD.Client_Init()                                                      -  Calls the Client's exported Init() function
+33. Void RSTD.Client_Build()                                                     -  Builds the Client (calls Client's Ctor and ExportToGui)
+34. Void RSTD.RunInBackground(String fileNameStr, String argumentStr)            -  Opens the file/executable with the given arguments and runs it Asynchronously, i.e. continues execution of the next command without waiting for process to finish.
+35. Void RSTD.WatchDogStart(UInt32 timeout, String script_name, Int32 level)     -  Opens WatchDog
+36. LuaTable RSTD.GetSearch(String base_path, String search_string, String search_context, String search_options)                                    -  Searches for the given search string in the exported tree under the base path specified and returns it as LuaTable  e.g.: GetSearch("/", "test", "Name|Value|Comment","MatchCase|WholeWord|RegularExpression")
+37. Void RSTD.TimerResetCount()                                                  -  Reset count of the timer triggers
+38. Void RSTD.TransmitArray(String varFullPath, Int32 offset, Int32 stride, Int32 length, LuaTable table_name_contains_new_value)                                                    -  Sets the given value in the variable that resides in the given path
+39. Void RSTD.HideWorkset()                                                      -  Hides the Workset.
+40. String RSTD.RunFunctionAsync(String funcCall)                                -  Runs the function that resides in the given tree path in a new thread.
+41. Boolean RSTD.IsMonitorOn()                                                   -  Return a bool indicates if monitor already took place
+42. Object[] RSTD.DoFileParams(String file_name, List`1 script_params)           -  Runs a file in Lua with given params
+43. Void RSTD.ClearOutput()                                                      -  Clear the output
+44. String RSTD.GetFileLastModified(String file_path)                            -  Get the last modification time of a given file (0 on error)
+45. Int32 RSTD.SubsetLoad(String file_name)                                      -  Show the SubSet.
+46. Int32 RSTD.NetClose_Port(Int32 port)                                         -  Close an RT3 Net Server
+47. Boolean RSTD.AL_GetStatus()                                                  -  Returns the Abstraction Layer's connection status (connected or not)
+48. LuaTable RSTD.GetFolder(String folder_path)                                  -  Returns all vars names within a folder into a lua table
+49. Int32 RSTD.NetClose()                                                        -  Close the RT3 Default Net Server
+50. String RSTD.GetConfigPath()                                                  -  Returns the Config working directory path.
+51. Void RSTD.Abort()                                                            -  Aborts the apply loop of the simulation
+52. Void RSTD.ShowLogFile()                                                      -  Opens the current log file.
+53. Void RSTD.SaveSearch(String base_path, String search_string, String search_context, String search_options, String fileName)                                                  -  Searches for the given search string in the exported tree under the base path specified and saves it to a file (in text or xml format according to the given file's extension) e.g.: SaveSearch("/", "test", "Name|Value|Comment","MatchCase|WholeWord|RegularExpression","C:\00\test.txt")
+54. Void RSTD.SaveConfig(String fileName)                                        -  Saves the Rstd Settings in the given file.
+55. Int32,String& RSTD.Execute(String cmd_str)                                   -  Execute shell commands in silent mode
+56. Void RSTD.RemoveFromWorkSet(String path)                                     -  Remove the node which resides in the given path from workset
+57. LuaTable RSTD.GetWorkSet()                                                   -  Get all variables in the workset as a Lua table (not inc. functions)
+58. Void RSTD.WatchDogStop()                                                     -  Close WatchDog
+59. Void RSTD.MonitorSave(String fileName)                                       -  Saves the variables from the monitor form to the given xml file.
+60. Void RSTD.AddToWorkSet(String path)                                          -  Add the node which resides in the given path to workset
+61. String RSTD.InputMessageBox(String message)                                  -  Writes the message in a GUI MessageBox and gets the answer from user
+62. Boolean RSTD.YesNoTimerMsgBox(String text, Boolean defaultAns, Int32 t)      -  Writes a question in a GUI MessageBox with timer
+63. LuaTable RSTD.Dir(String dir_path, String filter, Boolean recursive, Boolean full_path)              -  Returns all filenames in given path in Lua table
+64. Void RSTD.WorkSetTransmit()                                                  -  Transmit workset
+65. Void RSTD.Reggae()                                                           -  Opens Reggae with the last monitor output file.
+66. Void RSTD.GoToPath(String path)                                              -  Selects and Focuses the Gui on the variable/folder in the given path in the BrowseTree..
+67. Void RSTD.HideLuaShell()                                                     -  Hides the Lua Shell.
+68. Boolean RSTD.RegisterDllEx(String dll_path, Boolean save_to_settings)        -  Register DLL to Lua 
+69. Boolean RSTD.AddToAutoUpdate(String fullPath)                                -  Add Auto update to variable
+70. Void RSTD.UnBuild()                                                          -  Unbuild the Client (calls: Client Dtor, AL Dtor).
+71. Int32 RSTD.Run(String fileNameStr, String argumentStr)                       -  Opens the file/executable with the given arguments. Return the process’s return
+72. String RSTD.GetDllVersion(String dll_path)                                   -  Gets the dll assembly version
+73. Void RSTD.SaveClientSettings()                                               -  Save Rstd Client settings (first Tree tab) 
+74. Void RSTD.SleepUntil(String endCondition)                                    -  Executable main thread sleeps until RstdStopRunning() is called by the client.
+75. String RSTD.GetNodeType(String path)                                         -  Gets the type of the node in the given path
+(UNSUPPORTED, ROOT, TAB, FOLDER, FUNCTION, REGISTER, VAR, MAPPED_VAR, FIELD)
+76. Boolean RSTD.RemoveFromAutoUpdate(String fullPath)                           -  Remove Auto update from variable
+77. Void RSTD.NetCloseAll()                                                      -  Close all RT3 Net Servers
+78. Void RSTD.SaveTree(String path, String fileName)                             -  Saves the given path from the BrowseTree in the given xml file.
+79. String RSTD.GetRstdVersion()                                                 -  Returns the RSTD version
+80. Void RSTD.Transmit(String path)                                              -  Transmits the given BrowseTree path.
+81. String RSTD.GetClearCasePath()                                               -  Returns the ClearCase path which was defined.
+82. String RSTD.GetOutputPath()                                                  -  Returns the Output working directory path.
+83. Void RSTD.NetReset()                                                         -  Reset the RT3 Default Net Server
+84. Void RSTD.TimerEnd()                                                         -  Stop the timer, aborting it
+85. Void RSTD.BrowseTree()                                                       -  Shows the BrowseTree.
+86. Void RSTD.AutoUpdateStart()                                                  -  Start the Auto update
+87. Boolean RSTD.NetClientConnected_Port(Int32 port)                             -  Returns if a client is connected to the RT3 net server listening on provided port
+88. Void RSTD.ShowLuaHistoryFile()                                               -  Opens the current log file.
+89. Void RSTD.Client_UnBuild()                                                   -  UnBuilds the Client (Calls the Client's dtor and removes it's tabs from BrowseTree)
+90. String RSTD.BrowseForFile(String initial_dir, String filter, String title)   -  Browses for a file and returns its full path
+91. String RSTD.GetApplicationDir()                                              -  Get the directory where the RSTD.exe is located
+92. Void RSTD.ClearMonitor()                                                     -  Clears monitor
+93. Void RSTD.SubsetSave(Int32 handle, String path)                              -  Save SubSet
+94. Void RSTD.MonitorLoad(String fileName)                                       -  Loads variables from the given xml file into the monitor form.
+95. String RSTD.MonitorStart()                                                   -  Starts monitoring the variables in the monitor form.
+96. LuaTable RSTD.FolderBrowser()                                                -  Select a folder
+97. Void RSTD.SetMainWindowPos(Int32 x, Int32 y)                                 -  Sets the Main window's position
+98. Void RSTD.SetMessagesMask(Boolean on_off_flag)                               -  Switches to show only script messages (on) or all (off)
+99. Void RSTD.ClearWorkSet()                                                     -  Clears workset
+100. Void RSTD.SetAutoScroll(Boolean on_off_flag)                                -  Switches the output AutoScroll on or off
+101. Boolean RSTD.NetClientConnected()                                           -  Returns if a client is connected to the RT3 net server listening on default port
+102. Void RSTD.MessageColorAdvanced(String text, UInt32 text_color)              -  Writes the text in the Rstd console in specified color, removes 
+103. LuaTable RSTD.ReceiveArray(String varFullPath, Int32 offset, Int32 stride, Int32 length)                -  Gets the array of values of the variable that resides in the given path
+104. String RSTD.GetWorkingDirectory()                                           -  Displays the current working directory
+105. Void RSTD.SetVar(String varFullPath, String newValue)                       -  Sets the given value in the variable that resides in the given path
+106. Void RSTD.WorkSetReceive()                                                  -  Receive workset
+107. Void RSTD.DeleteAllFiles()                                                  -  Deletes all monitor*.rtd files from the "<output>\ Monitors\"  folder.
+108. Int32 RSTD.TimerGetCount()                                                  -  Get the number of times the timer has triggered
+109. Void RSTD.SubsetTransmit(Int32 handle)                                      -  Transmit SubSet
+110. Void RSTD.AL_LoadALXml()                                                    -  Loads AL XML
+111. Boolean RSTD.FileExists(String path)                                        -  Returns true if file exists
+112. Void RSTD.HideOutput()                                                      -  Hides the Output form.
+113. Void RSTD.LoadTree(String fileName)                                         -  Loads the given xml file into the BrowseTree.
+114. Void RSTD.Client_Reset()                                                    -  Calls the Client's exported Reset() function
+115. String RSTD.GetToolbarScript()                                              -  Returns the script selected in the lower toolbar
+116. Boolean RSTD.UnRegisterDll(String dll_path)                                 -  UnRegister a previously registered Dll
+117. String RSTD.BrowseForFolder(String initial_dir, String description)         -  Browses for a folder and returns its full path
+118. Void RSTD.WatchDogStopAu()                                                  -  Close WatchDog
+119. Void RSTD.Build()                                                           -  Build the Client (calls: AL Ctor, AL  ExportToGui, AL Init, Client Ctor, Client ExportToGui)
+120. String RSTD.GetInputPath()                                                  -  Returns the Input working directory path.
+121. Void RSTD.LuaShell()                                                        -  Shows the Lua Shell.
+122. Void RSTD.Client_LoadXml()                                                  -  Loads Client XML
+123. Void RSTD.WorkSetLoad(String file_name)                                     -  Loads a file to workset
+124. Void RSTD.SubsetClose(Int32 handle, Boolean b_save)                         -  Close SubSet
+125. Void RSTD.AL_Build()                                                        -  Builds the Abstraction Layer (Calls the AL's Ctor and ExportToGui)
+126. Int32 RSTD.SubsetNew()                                                      -  Creates SubSet. Returns subset handle
+127. Void RSTD.AL_Reset()                                                        -  Calls the AL's exported Reset() function
+128. UInt32 RSTD.bitWiseNot(UInt32 inNum)                                        -  bitWise Not
+129. Void RSTD.Stop()                                                            -  Stops the simulation.
+130. Int32,Int32& RSTD.GetMainWindowPos()                                        -  Returns the Main window's position (x & y)
+131. String RSTD.GetVarDisplay(String var_full_path, String display_type)        -  Returns var in the chosen display format
+132. String RSTD.GetRstdPath()                                                   -  Get the directory where the RSTD application resides
+133. Void RSTD.AutoUpdateStop()                                                  -  Stop the Auto update
+134. Boolean RSTD.RegisterClient(String ip_address, Int32 port, String table_name)     -  Register a Lua table as a client for sending remote calls to an RT3 server at ip_address:port
+135. Void RSTD.Sleep(Int32 sleepDuration_milliSec)                               -  Executable main thread sleeps the amount of given miliseconds..
+136. LuaTable RSTD.DoString(String str_expression)                               -  Runs a string in Lua
+137. Void RSTD.SubsetAdd(Int32 handle, String path)                              -  Add register to subset
+138. Void RSTD.ExportToCsv(String node_path, String file_path, String display_type)      -  Saves to a csv file all nodes from a given folder in display_type
+139. Int32 RSTD.NetStart()                                                       -  Start the RT3 Net Server listening on default port (2777)
+140. Int32 RSTD.CreateUserDefinedLogFile(String path, Int32 reserved)            -  Creates a new used defined logfile.
+141. String RSTD.ReceiveAndGet(String varFullPath)                               -  Calls both Receive and GetVar (in that order) for a given variable.
+142. Void RSTD.Output()                                                          -  Shows the Output form.
+143. Void RSTD.KillReggae()                                                      -  Kills all reggae instances which were called from the current Rstd process.
+144. Void RSTD.LoadVarFromFile(String varFullPath, String fileName)              -  Loads a vector from a file (with values separated by a newline character) into the given variable.
+145. Void RSTD.MonitorStop()                                                     -  Stops monitoring the variables in the monitor form.
+146. Void RSTD.Workset()                                                         -  Shows the Workset.
+147. Void RSTD.SubsetClear(Int32 handle)                                         -  Clear SubSet
+148. String RSTD.GetLuaPath()                                                    -  Returns the Lua working directory path.
+149. Void RSTD.AddMonitorVar(String var_name, String rel_clocks, String vec_offset, String vec_stride, String vec_length)                                            -  Adds the given variable with the given clocks, offset, stride & length to the monitor form.
+150. Void RSTD.Log(String text, String color)                                    -  Writes the text in the Rstd console in specified color
+151. Void RSTD.SetVersion(String title)                                          -  Sets the title of the main form
+152. LuaTable RSTD.DoFile(String file_name)                                      -  Runs a file in Lua
+153. Void RSTD.SetMainWindowSize(Int32 width, Int32 height)                      -  Sets the Main window's size
+154. UInt32 RSTD.bitWiseOr(UInt32 frtNum, UInt32 scndNum)                        -  bitWise Or
+155. Boolean RSTD.RegisterServer(Int32 port)                                     -  Register the RT3 to listen on the specified port for incoming remote calls
+156. Boolean RSTD.IsDllRegistered(String dll_path)                               -  Check if DLL already registered
+157. Void RSTD.MonitorShow()                                                     -  Opens the Monitor form.
+158. Void RSTD.Plot(String chart_name, String series_name, LuaTable x_values, LuaTable y_values)                   -  Plots a vector to Reggae
+159. Void RSTD.WorkSetSave(String file_name)                                     -  Saves a file from workset
+160. Void RSTD.SetWorkingDirectory(String full_path)                             -  Changes the current working directory
+161. Void RSTD.AL_UnBuild()                                                      -  UnBuilds the Abstraction Layer (Calls the AL's Dtor and removes its tabs from the BrowseTree)
+162. Boolean RSTD.IsBuilt()                                                      -  Return a bool indicates if build already took place
+163. Int32 RSTD.NetStart_Port(Int32 port)                                        -  Start the RT3 Net Server listening on provided port
+164. Boolean RSTD.IsValidVarPath(String varFullPath)                             -  Check if given var path is valid
+165. Void RSTD.Message(String text)                                              -  Writes the text in the Rstd console
+166. Void RSTD.AL_Init()                                                         -  Calls the AL's exported Init() function
+167. Void RSTD.CreateNextLogFile()                                               -  Creates a new logfile (and verbose logfile) with the next sub index (i.e. "log0015_1.txt").
+168. String RSTD.GetVar(String varFullPath)                                      -  Gets the value of the variable that resides in the given path
+169. Void RSTD.ShowLastFile()                                                    -  Opens the last monitor file (rtd)
+170. Void RSTD.PlotAnotate(String chart_name, String x_axis_label, String y_axis_label, String chart_title)                              -  Sets annotation for a plotted chart
+171. Void RSTD.NetSyncTimout(Int32 timeout)                                      -  Set the sync timeout between several clients
+172. String RSTD.Receive(String path)                                            -  Receives the given BrowseTree path.
+173. Boolean RSTD.RegisterDll(String dll_path)                                   -  Register DLL to Lua
+174. Boolean RSTD.YesNoMsgBox(String question)                                   -  Writes a question in a GUI MessageBox
