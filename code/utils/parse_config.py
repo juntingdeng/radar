@@ -20,7 +20,7 @@ class radarConfig:
         self.cfg_port = 4096
         self.SysSrcIP = "192.168.33.30"
         self.FpgaDextIP = "192.168.33.180"
-        self.msgfile = "D:\\rawData\\test\\msg"
+        self.msgfile = "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\rawData\\test\\msg"
         self.angles = ['Elevation', 'Azimuth']
 
     def load_cfg(self, cfg_file):
@@ -62,8 +62,8 @@ class radarConfig:
                 params = params.split(',')
                 self.SysSrcIP = params[0]
                 self.FpgaDextIP = params[1]
-                self.cfg_port = params[3]
-                self.data_port = params[4]
+                self.cfg_port = int(params[3])
+                self.data_port = int(params[4])
 
         assert self.end_chirp - self.start_chirp + 1 == self.num_tx, 'Number of Tx does not match number of chirps'
 
@@ -74,8 +74,8 @@ class radarConfig:
         self.frame_act_ratio = (self.num_adc_samples/self.adc_sample_rate)/(self.ramp_end_time+self.idle_time)
 
         self.num_chirps = self.num_chirps*self.num_tx
-        samples_per_frame = self.num_adc_samples*self.num_chirps*self.num_rx
-        self.packets_per_frame = (2*samples_per_frame)//(728*2)
+        self.samples_per_frame = self.num_adc_samples*self.num_chirps*self.num_rx
+        self.packets_per_frame = (2*self.samples_per_frame)//(728*2)
 
         self.bandwidth = self.chirp_slope*self.ramp_end_time*1e6
         self.range_resolution = LIGHT_SPEED/(2*self.bandwidth)
@@ -86,7 +86,7 @@ class radarConfig:
         self.max_doppler = self.doppler_resolution * self.num_chirps / 2
 
         self.ranges_real = np.arange(0, self.max_range/2 + self.range_resolution, self.range_resolution)
-        range_ticks_real = np.arange(0, len(self.ranges_real)/2, len(self.ranges_real)//20)
+        range_ticks_real = np.arange(0, len(self.ranges_real), len(self.ranges_real)//10)
         range_tick_labels_real = self.ranges_real[::len(self.ranges_real)//10].round(2)[::-1]
         
         self.num_ant = [self.num_tx, self.num_rx*self.num_tx]

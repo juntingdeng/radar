@@ -70,56 +70,59 @@ def _read_data_packet(data_socket):
     packet_data = np.frombuffer(data[10:], dtype=np.int16)
     return packet_num, byte_count, packet_data
 
-def collector():
-    global visualize_buffer
-    global cfg
-    global lock
+class collector():
+    def __init__(self, visualize_buffer, radar, lock):
+        self.visualize_buffer = visualize_buffer
+        self.radar = radar
+        self.lock = lock
+    
+    def collect(self):
+        print(self.radar.SysSrcIP, self.radar.cfg_port)
+        _config_socket = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        _config_socket.bind(("192.168.33.30", self.radar.cfg_port))
 
-    _config_socket = socket.socket(
-        socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    _config_socket.bind((cfg.SysSrcIP, cfg.cfg_port))
+        data_socket = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        data_socket.bind(("192.168.33.30", self.radar.data_port))
+        data_socket.settimeout(10)
 
-    data_socket = socket.socket(
-        socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    data_socket.bind((cfg.SysSrcIP, cfg.data_port))
-    data_socket.settimeout(10)
+        # Instruct the mmWave Studio Lua server to instruct the radar to start
+        # collecting data.
+        with open(self.radar.msgfile, 'w') as f:
+            f.write("start")
+            print("written start.")
 
-    # Instruct the mmWave Studio Lua server to instruct the radar to start
-    # collecting data.
-    with open(cfg.msgfile, 'w') as f:
-        f.write("start")
-        print("written start.")
+        with tb.open_file(datetime.now().strftime("%Y.%m.%d-%H.%M.%S") + ".h5", 
+                        mode='w', title='Packet file') as h5file:
+            dataset = DataCollector(h5file)
+            try:
+                while True:
+                    packet_num, byte_count, packet_data = _read_data_packet(data_socket)
+                    dataset.write_packet(packet_num, byte_count, packet_data)
+                    if dataset.chunk_packets >= PACKET_BUFSIZE:
+                        dataset.flush()
 
-    with tb.open_file(datetime.now().strftime("%Y.%m.%d-%H.%M.%S") + ".h5", 
-                    mode='w', title='Packet file') as h5file:
-        dataset = DataCollector(h5file)
-        try:
-            while True:
-                packet_num, byte_count, packet_data = _read_data_packet(data_socket)
-                dataset.write_packet(packet_num, byte_count, packet_data)
-                if dataset.chunk_packets >= PACKET_BUFSIZE:
-                    dataset.flush()
+                    # if not lock.locked(): 
+                    with self.lock:
+                        # print(f'Inside collector lock')
+                        if self.visualize_buffer is not None:
+                            # if visualize_buffer.shape[0] % 728 != 0:
+                            #     print(visualize_buffer.shape, packet_data.shape)
+                            #     break
+                            self.visualize_buffer = np.concatenate([self.visualize_buffer, packet_data.reshape(-1)], axis=0)
+                            
+                        else:
+                            self.visualize_buffer = packet_data.reshape(-1)
 
-                # if not lock.locked(): 
-                with lock:
-                    # print(f'Inside collector lock')
-                    if visualize_buffer is not None:
-                        # if visualize_buffer.shape[0] % 728 != 0:
-                        #     print(visualize_buffer.shape, packet_data.shape)
-                        #     break
-                        visualize_buffer = np.concatenate([visualize_buffer, packet_data.reshape(-1)], axis=0)
-                        
-                    else:
-                        visualize_buffer = packet_data.reshape(-1)
-
-        except Exception as e:
-            print("Radar data collection failed. Was the radar shut down?")
-            print(f'Capture Exception: {e}')
-        except KeyboardInterrupt:
-            print(
-                "Received KeyboardInterrupt, stopping.\n"
-                "Do not press Ctrl+C again!")
-            with open(cfg["msgfile"], 'w') as f:
-                f.write("stop")
-        finally:
-            dataset.flush()
+            except Exception as e:
+                print("Radar data collection failed. Was the radar shut down?")
+                print(f'Capture Exception: {e}')
+            except KeyboardInterrupt:
+                print(
+                    "Received KeyboardInterrupt, stopping.\n"
+                    "Do not press Ctrl+C again!")
+                with open(self.radar.msgfile, 'w') as f:
+                    f.write("stop")
+            finally:
+                dataset.flush()

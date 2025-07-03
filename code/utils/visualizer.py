@@ -5,20 +5,22 @@ from utils.capon import *
 
 class MyApp(QtWidgets.QWidget):
     def __init__(self, radar,
-                    visualize_buffer,
+                    collector,
                     live,
                     adc_frames,
                     npeaks,
                     range_ticks_real,
-                    range_tick_labels_real):
+                    range_tick_labels_real,
+                    lock=None):
         
         super().__init__()
         self.radar = radar
-        self.visualize_buffer = visualize_buffer
+        self.collector = collector
         self.live = live
         self.frame_idx = 0
         self.adc_frames = adc_frames
         self.npeaks = npeaks
+        self.lock = lock
 
         self.plots = [None]*len(self.radar.angles)
         self.images = [None]*len(self.radar.angles)
@@ -27,8 +29,10 @@ class MyApp(QtWidgets.QWidget):
         angle_pos = np.linspace(0, 181, 9)
         angle_tick = np.linspace(-90, 90, 9).round(1)
         range_tick_labels_real_ = range_tick_labels_real[::-1]
+        print(range_tick_labels_real, range_ticks_real)
         angle_ticks = [(angle_pos[i], str(angle_tick[i])) for i in range(angle_pos.shape[0])]
         range_ticks = [(range_ticks_real[i], str(range_tick_labels_real_[i])) for i in range(range_ticks_real.shape[0])]
+        print(range_ticks)
 
         layout = QtWidgets.QVBoxLayout(self)
         # Create GraphicsLayoutWidget
@@ -60,13 +64,13 @@ class MyApp(QtWidgets.QWidget):
         adc_data = None
 
         if self.live:
-            if visualize_buffer is not None and visualize_buffer.shape[0] > self.radar.samples_per_frame:
-                adc_raw = visualize_buffer[: self.radar.samples_per_frame]
-                visualize_buffer = visualize_buffer[self.radar.samples_per_frame: ]
-                print("One frame received.")
-                adc_raw = adc_raw.reshape(self.radar.num_chirps, self.radar.num_rx, self.radar.num_adc_samples)
-                adc_data = np.concatenate([adc_raw[i::self.radar.num_tx, :, :] for i in range(self.radar.num_tx)], axis=-2)
-                print(f'Caputred data shape:{adc_data.shape}')
+            with self.lock:
+                if self.collector.visualize_buffer is not None and self.collector.visualize_buffer.shape[0] > self.radar.samples_per_frame:
+                    adc_raw = self.collector.visualize_buffer[: self.radar.samples_per_frame]
+                    self.collector.visualize_buffer = self.collector.visualize_buffer[self.radar.samples_per_frame: ]
+                    adc_raw = adc_raw.reshape(self.radar.num_chirps, self.radar.num_rx, self.radar.num_adc_samples)
+                    adc_data = np.concatenate([adc_raw[i::self.radar.num_tx, :, :] for i in range(self.radar.num_tx)], axis=-2)
+                    print(f'One frame received. Caputred data shape:{adc_data.shape}')
         else:
             adc_data = self.adc_frames[self.frame_idx]
             self.frame_idx += 1

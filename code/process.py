@@ -23,9 +23,11 @@ def main(args):
     visualize_buffer = None
     adc_frames = None
     npeaks = args.npeaks
+    lock = None
     if live:
         lock = threading.Lock()
-        thread = threading.Thread(target=collector, daemon=True)
+        obj = collector(visualize_buffer=visualize_buffer, radar=radar, lock=lock)
+        thread = threading.Thread(target=obj.collect, daemon=True)
         thread.start()
     else:
         allkeys = collections.defaultdict(list)
@@ -51,8 +53,9 @@ def main(args):
 
     app = QtWidgets.QApplication([])
     win = MyApp(radar=radar,
-                visualize_buffer=visualize_buffer,
+                collector=obj,
                 live=live,
+                lock = lock,
                 adc_frames=adc_frames,
                 npeaks=npeaks,
                 range_ticks_real=range_ticks_real,
@@ -64,7 +67,7 @@ def main(args):
 
 def args_parser():
     args = argparse.ArgumentParser()
-    args.add_argument('--cfg_file', default='./mmWaveStudio/startup_capture.lua')
+    args.add_argument('--cfg_file', default='./mmWaveStudio/server.lua')
     args.add_argument('--data_file', default=None, type=str)
     args.add_argument('--live', action='store_true')
     args.add_argument('--npeaks', default=16, type=int)
