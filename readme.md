@@ -21,7 +21,8 @@ Radar Data collection and processing:
     1. Initialize radar configuration by running '/radar/init.py'. Change radar configuration by modifying /mmWaveStudio/server.lua.
     2. Run' /radar/collect.py' to store raw radar data to .h5 file.
     3. Run 'process.py --cfg_file --data_file' to get processed range-angle spectrum.
-    4. Run 'process.py --cfg_file --live' to realize data processing while collecting data.
+    4. Run 'process.py --cfg_file --live' to realize data processing while collecting data. 
+    5. Run '/radar/manual_stop.py' to stop the radar in case the script terminates improperly while the radar is still transmitting data.
 
 RGB and Radar data collection:
 
