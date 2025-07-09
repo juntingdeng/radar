@@ -34,7 +34,7 @@ def aoa_capon(x, a):
             capon_spectrum - Computed Capon Spectrum (num_angles)
     """
     # perturbation
-    p = np.eye(x.shape[0]) * 1e-9
+    p = np.eye(x.shape[0]) * 1e-9   # source covariance
 
     Rxx = x @ np.conj(x).T
     Rxx = forward_backward_avg(Rxx)

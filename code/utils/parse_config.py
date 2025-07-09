@@ -10,7 +10,7 @@ class radarConfig:
         self.adc_start_time = 6 # usec
         self.ramp_end_time = 120 # usec, ramp_end_time = adc_start_time + adc_sample_time(per chirp) + extral_time
         self.chirp_slope =  29.982 # MHz/usec
-        self.num_adc_samples = 1024
+        self.num_adc_samples = 128
         self.adc_sample_rate = 10 # Msps
         self.num_frames = 256
         self.num_chirps = 255 # per TX
@@ -20,8 +20,9 @@ class radarConfig:
         self.cfg_port = 4096
         self.SysSrcIP = "192.168.33.30"
         self.FpgaDextIP = "192.168.33.180"
-        self.msgfile = "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\rawData\\test\\msg"
+        self.msgfile = "C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg"
         self.angles = ['Elevation', 'Azimuth']
+        self.range_max = LIGHT_SPEED * self.adc_start_time * self.num_adc_samples / (2 * self.chirp_slope)
 
     def load_cfg(self, cfg_file):
         ## Parse radar configuration from .lua file
@@ -46,6 +47,7 @@ class radarConfig:
                 self.ramp_end_time = params[4]
                 self.chirp_slope = params[13]
                 self.num_adc_samples = int(params[15])
+                # self.num_adc_samples = 1024
                 self.adc_sample_rate = params[16]/1000
             
             elif line.split('(')[0] == 'ar1.FrameConfig':
@@ -56,6 +58,7 @@ class radarConfig:
                 self.end_chirp = int(params[1])
                 self.num_frames = int(params[2])
                 self.num_chirps = int(params[3])
+                # self.num_chirps = 128
             
             elif line.split('(')[0] == 'ar1.CaptureCardConfig_EthInit':
                 params = line.split('(')[1].split(')')[0]
@@ -91,7 +94,7 @@ class radarConfig:
         
         self.num_ant = [self.num_tx, self.num_rx*self.num_tx]
         self.steering_vectors =[compute_steering_vector(num_ant=n, angle_res=1.0, angle_rng=90) for n in self.num_ant]
-        
+        # self.range_max = max(range_ticks_real)
         attrs = ','.join([f'({key}: {val:.2f})' for key, val in vars(self).items() if isinstance(val, (int, float))])
         print(attrs)
         

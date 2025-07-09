@@ -42,7 +42,7 @@ ar1.LVDSLaneConfig(0, 1, 1, 0, 0, 1, 0, 0)
 -- ar1.ProfileConfig(UInt16 profileId, Double startFreqConst, Single idleTimeConst, Single adcStartTimeConst, 
 -- Single rampEndTime, UInt32 tx0OutPowerBackoffCode, UInt32 tx1OutPowerBackoffCode, UInt32 tx2OutPowerBackoffCode, UInt32 tx3OutPowerBackoffCode, Single tx0PhaseShifter, Single tx1PhaseShifter, Single tx2PhaseShifter, Single tx3PhaseShifter, Single freqSlopeConst, Single txStartTime, UInt16 numAdcSamples, UInt16 digOutSampleRate, UInt32 hpfCornerFreq1, 
 -- UInt32 hpfCornerFreq2, Char rxGain, Char hpfInitControlSelect, Char highResTxPowerEn, Char runTimeTxPowMultiTxCalEn) - Profile configuration API which defines chirp profile parameters
-ar1.ProfileConfig(0, 77, 10, 6, 120, 0, 0, 0, 0, 0, 0, 0, 0, 29.982, 0, 64, 10000, 2216755200, 0, 30, 0, 0, 0)
+ar1.ProfileConfig(0, 77, 10, 6, 120, 0, 0, 0, 0, 0, 0, 0, 0, 29.982, 0, 1024, 10000, 2216755200, 0, 30, 0, 0, 0) -- todo adjust adc sample rate
 ar1.ChirpConfig(0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
 ar1.ChirpConfig(1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0)
 ar1.ChirpConfig(2, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0)
@@ -62,14 +62,14 @@ print("Initialization complete.")
 -- Server ---------------------------------------------------------------------
 
 function read()
-    local file = io.open("G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\rawData\\test\\msg", "r")
+    local file = io.open("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg", "r")
     if not file then
         return nil
     end
     local msg = file:read("*a")
     print("read msg: ", msg)
     file:close()
-    os.remove( "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\rawData\\test\\msg")
+    os.remove("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg")
     return msg
 end
 
@@ -79,7 +79,7 @@ while true do
     if msg == "start" then
         if running == false then
             print("Starting capture...")
-            ar1.CaptureCardConfig_StartRecord("G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\rawData\\test\\tmp.bin", 1)
+            ar1.CaptureCardConfig_StartRecord("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\tmp.bin", 1)
             ar1.StartFrame()
             running = true
         else
