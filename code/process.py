@@ -43,6 +43,13 @@ def main(args):
         print(f'adc_raw shape:{adc_raw.shape}')
 
         nframes = adc_raw.shape[0] // (radar.num_adc_samples*radar.num_chirps*radar.num_rx)
+        print(f'adc_raw.shape[0]: {adc_raw.shape[0]}, radar.num_adc_samples: {radar.num_adc_samples}, radar.num_chirps: {radar.num_chirps}, radar.num_rx: {radar.num_rx}, nframes: {nframes}')
+        
+        # Ensure adc_raw is a multiple of the number of samples
+        if adc_raw.shape[0] != adc_raw.shape[0] == radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames:
+            print('Inconsistent adc_raw shape, adjusting...')
+            adc_raw = adc_raw[:radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames]
+
         assert adc_raw.shape[0] == radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames or 0 < nframes <radar.num_frames
         print(f'{nframes} received')
         adc_raw = adc_raw[ :radar.num_adc_samples*radar.num_chirps*radar.num_rx*nframes]
