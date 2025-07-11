@@ -1,0 +1,99 @@
+>help ar1.ChanNAdcConfig
+Int32 ar1.ChanNAdcConfig(UInt16 Tx0En, UInt16 Tx1En, UInt16 Tx2En, UInt16 Tx3En, UInt16 Rx0En, UInt16 Rx1En, UInt16 Rx2En, UInt32 Rx3En, Int32 BitsVal, UInt32 FmtVal, UInt32 IQSwap) -  Static device config API which defines configure both the Transmiter and Reciever channels of Radar device and also ADC data format output
+_I_ UInt16	Tx0En	 - Tx0 channel
+_I_ UInt16	Tx1En	 - Tx1 channel
+_I_ UInt16	Tx2En	 - Tx2 channel
+_I_ UInt16	Tx3En	 - Tx3 channel
+_I_ UInt16	Rx0En	 - Rx0 channel
+_I_ UInt16	Rx1En	 - Rx1 channnel
+_I_ UInt16	Rx2En	 - Rx2 channel
+_I_ UInt32	Rx3En	 - Rx3 channel[b15:0] + (CascadePinOutCfg[b31:16] b16:ClkOutMasterDis, b17:SynOutMasterDis, b18:ClkOutSlaveEna, b19:SynOutSlaveEna, b20:IntLOMasterEna, b21:OSCClkOutMasterDis, b22:INTFRCMasterEna, b23:OscClkOutEthEn, b24:OscClkDiv, b25:oscClkOutEthVal0, b26:oscClkOutEthVal1, b27:oscClkOutEthVal2, b28:oscClkOutEthVal3)
+_I_ Int32	BitsVal	 - Number of ADC bits
+_I_ UInt32	FmtVal	 - ADC output format[b15:0] + FullScaleReductionFactor[b31:16]
+_I_ UInt32	IQSwap	 - ADC Mode[b15:0] + CascadeMode[b31:16](Single Chip: 0x0000, MultiChip Master:0x0001, MultiChip Slave:0x0002)
+
+>help ar1.ProfileConfig
+Int32 ar1.ProfileConfig(UInt16 profileId, Double startFreqConst, Single idleTimeConst, Single adcStartTimeConst, Single rampEndTime, UInt32 tx0OutPowerBackoffCode, UInt32 tx1OutPowerBackoffCode, UInt32 tx2OutPowerBackoffCode, UInt32 tx3OutPowerBackoffCode, Single tx0PhaseShifter, Single tx1PhaseShifter, Single tx2PhaseShifter, Single tx3PhaseShifter, Single freqSlopeConst, Single txStartTime, UInt16 numAdcSamples, UInt16 digOutSampleRate, UInt32 hpfCornerFreq1, UInt32 hpfCornerFreq2, Char rxGain, Char hpfInitControlSelect, Char highResTxPowerEn, Char runTimeTxPowMultiTxCalEn) - Profile configuration API which defines chirp profile parameters
+_I_ UInt16	profileId	 - Chirp Profile Id [0 to 3]
+_I_ Double	startFreqConst	 - Chirp Start Frequency in GHz
+_I_ Single	idleTimeConst	 - Chirp Idle Time in µs
+_I_ Single	adcStartTimeConst	 - Chirp ADC Start Time in µs
+_I_ Single	rampEndTime	 - Chirp Ramp End Time in µs
+_I_ UInt32	tx0OutPowerBackoffCode	 - TX0 channel Power Backoff in dB
+_I_ UInt32	tx1OutPowerBackoffCode	 - TX1 channel Power Backoff in dB
+_I_ UInt32	tx2OutPowerBackoffCode	 - TX2 channel Power Backoff in dB
+_I_ UInt32	tx3OutPowerBackoffCode	 - TX3 channel Power Backoff in dB
+_I_ Single	tx0PhaseShifter	 - TX0 channel Phase Shifter Value in deg
+_I_ Single	tx1PhaseShifter	 - TX1 channel Phase Shifter in deg
+_I_ Single	tx2PhaseShifter	 - TX2 channel Phase Shifter in deg
+_I_ Single	tx3PhaseShifter	 - TX3 channel Phase Shifter in deg
+_I_ Single	freqSlopeConst	 - Chirp Frequency Slope in MHz/µs
+_I_ Single	txStartTime	 - TX Start Time in µs
+_I_ UInt16	numAdcSamples	 - RX Number of Adc Samples
+_I_ UInt16	digOutSampleRate	 - RX Sampling Rate in ksps
+_I_ UInt32	hpfCornerFreq1	 - RX HPF1 corner frequency,[b15:0 (0x00-350 kHz, 0x01-700 kHz, 0x02-1.4 MHz, 0x03-2.8 MHz, 0x04-300 kHz)] + TxChnCalibSet[b31:16]
+_I_ UInt32	hpfCornerFreq2	 - RX HPF2 corner frequency,[b15:0 (0x00-350 kHz, 0x01-700 kHz, 0x02-1.4 MHz, 0x03-2.8 MHz, 0x04-300 kHz)] + ForceVCOSelet[b16] and VCOSelect[b17,b18] , RetainTxCalUpdate[b24] , RetainRxCalLut[b25]
+_I_ Char	rxGain	 - RX Gain in dB(b0:5), RF Gain Target(b6:7)values 30dB:00, 32dB:01, 35dB:10, Reserved:11
+_I_ Char	hpfInitControlSelect	 -  HPF fast initialization feature enable/Disable
+_I_ Char	highResTxPowerEn	 - High Res Tx power enable/disable
+_I_ Char	runTimeTxPowMultiTxCalEn	 - Run time Tx power Multi TX Cal enable/disable
+
+>help ar1.FrameConfig
+Int32 ar1.FrameConfig(UInt16 chirpStartIdx, UInt16 chirpEndIdx, UInt16 frameCount, UInt16 loopCount, Single periodicity, Single triggerDelay, UInt16 TriggerSelect) - Frame Configuration API defines Frame formation which has sequence of chirps to be transmitted subsequently
+_I_ UInt16	chirpStartIdx	 - First Chirp Start Index number
+_I_ UInt16	chirpEndIdx	 - Last chirp Index number
+_I_ UInt16	frameCount	 - Number of frames to transmit
+_I_ UInt16	loopCount	 - Number of times to repeat from start chirp to last chirp in each frame
+_I_ Single	periodicity	 - Each frame repetition period in ms
+_I_ Single	triggerDelay	 -  Optional time delay from sync in trigger to the occurrence of frame chirps in µs
+_I_ UInt16	TriggerSelect	 - TriggerSelect
+
+>help ar1.CaptureCardConfig_Mode
+Int32 ar1.CaptureCardConfig_Mode(UInt32 eLogMode, UInt32 eLvdsMode, UInt32 eDataXferMode, UInt32 eDataCaptureMode, UInt32 eDataFormatMode, Byte u8Timer) - ConfigureRFDCCardMode API used to configured the ethernet mode
+_I_ UInt32	eLogMode	 - eLogMode, Raw mode : 1, Multimode:2
+_I_ UInt32	eLvdsMode	 - eLvdsMode or Radar DeviceType: AR12xx or AR14:1, AR16xx or AR18xx or AR68xx or AR29xx:2:
+_I_ UInt32	eDataXferMode	 - eDataXferMode, LVDS: 1, DMM:2
+_I_ UInt32	eDataCaptureMode	 - eDataCaptureMode, EthernetMode:2, SDCard:1
+_I_ UInt32	eDataFormatMode	 - eDataFormatMode, 12-bit:1, 14-bit:2, 16-bit:3
+_I_ Byte	u8Timer	 - u8Timer
+
+>help ar1.LVDSLaneConfig
+Int32 ar1.LVDSLaneConfig(UInt16 laneFrmtCfg, UInt16 lane1En, UInt16 lane2En, UInt16 lane3En, UInt16 lane4En, UInt16 msbFst, UInt16 pktEndPls, UInt16 crcEn) - LVDSLaneConfig API Defines the device data format configuration
+_I_ UInt16	laneFrmtCfg	 - Radar ADC output bit format configuration
+_I_ UInt16	lane1En	 - Rx1 Channel enable
+_I_ UInt16	lane2En	 - Rx2 Channel enable
+_I_ UInt16	lane3En	 - Rx3 Channel enable
+_I_ UInt16	lane4En	 - Rx4 Channel enable
+_I_ UInt16	msbFst	 - Data recieve format type
+_I_ UInt16	pktEndPls	 - Packet End Pulse
+_I_ UInt16	crcEn	 - CRC Enable - bit 0; Discontinous Clock Mode - bit 1
+
+>help ar1.LvdsClkConfig
+Int32 ar1.LvdsClkConfig(Char laneClk, Char dataRate) - LvdsClkConfig API Defines the used to HSI Clock configuration
+_I_ Char	laneClk	 - Lane Clock selection
+_I_ Char	dataRate	 - Data rate selection
+
+>help ar1.ChirpConfig
+Int32 ar1.ChirpConfig(UInt16 chirpStartIdx, UInt16 chirpEndIdx, UInt16 profileId, Single startFreqVar, Single freqSlopeVar, Single idleTimeVar, Single adcStartTimeVar, UInt16 tx0Enable, UInt16 tx1Enable, UInt16 tx2Enable, UInt16 tx3Enable) - Chirp configuration API which defines which profile is to be used for each chirp in a frame
+_I_ UInt16	chirpStartIdx	 - First Chirp Start Index number
+_I_ UInt16	chirpEndIdx	 - Last chirp Index number
+_I_ UInt16	profileId	 - Chirp Configured profileId
+_I_ Single	startFreqVar	 - Chirp start frequency var in MHz
+_I_ Single	freqSlopeVar	 - frequency Slope Var in MHz/µs
+_I_ Single	idleTimeVar	 - Idle Time Var in µs
+_I_ Single	adcStartTimeVar	 - ADC Start Time Var in µs
+_I_ UInt16	tx0Enable	 - tx0 channel
+_I_ UInt16	tx1Enable	 - tx1 channel
+_I_ UInt16	tx2Enable	 - tx2 channel
+_I_ UInt16	tx3Enable	 - tx3 channel
+
+>help ar1.LPModConfig
+Int32 ar1.LPModConfig(Int32 AnaChan, Int32 LpAdcMod) - LP Mod Config API which defines both Configure the ADC Mode and analog filter channel format
+_I_ Int32	AnaChan	 - Analog filter Chananel
+_I_ Int32	LpAdcMod	 - ADC Mode
+
+>help ar1.DataPathConfig
+Int32 ar1.DataPathConfig(UInt32 intfSel, UInt32 transferFmtPkt0, UInt32 transferFmtPkt1) - DataPathConfig API Defines the used to configure the device data path
+_I_ UInt32	intfSel	 - Data path interface select(0:7)+ CQ config(b8:15)
+_I_ UInt32	transferFmtPkt0	 - Data output format(b0:7)+ CQ0TransSize(b8:15)+ CQ1TransSize(b16:23)+ CQ2TransSize(b24:31)
+_I_ UInt32	transferFmtPkt1	 - Supress packet 1 transmission
