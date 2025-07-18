@@ -3,6 +3,8 @@ from pyqtgraph.Qt import QtGui, QtCore, QtWidgets
 import numpy as np
 from utils.capon import *
 from scipy.interpolate import griddata
+# from utils.camera import CameraStream
+from utils.cfar import *
 
 class MyApp(QtWidgets.QWidget):
     def __init__(self, radar,
@@ -28,8 +30,8 @@ class MyApp(QtWidgets.QWidget):
         self.scatters = [None]*len(self.radar.angles)
         
         self.BEV = True
-        
-        
+
+        # self.camera = CameraStream()
 
         angle_pos = np.linspace(0, 181, 9)
         angle_tick = np.linspace(-90, 90, 9).round(1)
@@ -69,49 +71,48 @@ class MyApp(QtWidgets.QWidget):
             self.bev_plot.getAxis('bottom').setLabel("X (meters)")
             self.bev_plot.getAxis('left').setLabel("Y (meters)")
             self.bev_plot.invertY(False)
+        
+        # cam_plot = self.plot_widget.addPlot(row=1, col=0, colspan=len(self.radar.angles))
+        # self.cam_frame = pg.ImageItem()
+        # cam_plot.addItem(self.cam_frame)
+        # self.cam_scatter = pg.ScatterPlotItem(size=8, brush=pg.mkBrush(255, 255, 0, 200))  # white dots
+        # cam_plot.addItem(self.cam_scatter)
             
-            range_max = self.radar.max_range / 2
-            
-
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
         self.timer.start(100)
 
     def update(self):
         adc_data = None
-
+        cam_frame = None
         if self.live:
             with self.lock:
+                
                 if self.collector.visualize_buffer is not None and self.collector.visualize_buffer.shape[0] > self.radar.samples_per_frame:
+                    # cam_frame = self.cam.read()
+
                     adc_raw = self.collector.visualize_buffer[: self.radar.samples_per_frame]
                     self.collector.visualize_buffer = self.collector.visualize_buffer[self.radar.samples_per_frame: ]
                     adc_raw = adc_raw.reshape(self.radar.num_chirps, self.radar.num_rx, self.radar.num_adc_samples)
                     adc_data = np.concatenate([adc_raw[i::self.radar.num_tx, :, :] for i in range(self.radar.num_tx)], axis=-2)
                     print(f'One frame received. Caputred data shape:{adc_data.shape}')
+
         else:
             adc_data = self.adc_frames[self.frame_idx]
             self.frame_idx += 1
             if self.frame_idx >= self.adc_frames.shape[0]:
                 self.timer.stop()
         
-        if adc_data is not None:
+        if adc_data is not None: # and cam_frame is not None:
             ## Perform 2d FFT for azimuth-elevation estimation
             print(f'adc_data shape: {adc_data.shape}')
             print(f'self.radar.num_rx: {self.radar.num_rx}, self.radar.num_tx: {self.radar.num_tx}, self.radar.num_chirps: {self.radar.num_chirps}, self.radar.num_adc_samples: {self.radar.num_adc_samples}')
             range_cube = np.fft.fft(adc_data, axis=2).transpose(2, 1, 0) #[range, channel, doppler]
             print(f'Range cube shape: {range_cube.shape}')
-            # num_range_bins = range_cube.shape[0]
-            # freqs = np.fft.fftfreq(num_range_bins)
-            # sigma = 0.5  # smaller = narrower LPF
-            # gaussian_filter = np.exp(-0.5 * (freqs / sigma) ** 2)
-            # range_cube *= gaussian_filter[:, None, None]
-            range_doppler = np.fft.fftshift(np.fft.fft(range_cube, axis=2), axes=2) #[range, channel, doppler]
+            range_doppler = np.fft.fftshift(np.fft.fft(range_cube, axis=2), axes=2) #[range, channel, doppler]  
             
-            
-            
-            min_dB = 40  
-            max_dB = 200    
-            
+            range_azimuths = []
+            detecteds = []
             # fig, ax = plt.subplots(len(num_ant), 2, figsize=(9, 10))
             for i, (n, angle) in enumerate(zip(self.radar.num_ant, self.radar.angles)):
                 print(f'Processing {angle} with {n} antennas, index: {i}')
@@ -130,16 +131,31 @@ class MyApp(QtWidgets.QWidget):
                     range_azimuth[range_i,:] = aoa_capon(range_doppler_mean[range_i, ...], self.radar.steering_vectors[i])
                 range_azimuth = np.flipud(range_azimuth)
                 range_azimuth = 10*np.log10(np.abs(range_azimuth))
-                range_azimuth = range_azimuth[range_azimuth.shape[0]//2:, :]
+                range_azimuth = range_azimuth[range_azimuth.shape[0]//2:, :][::2]
                 
-
-                # self.images[i].setImage(
-                #     np.fliplr(range_azimuth[::2, :].T),
-                #     levels=(min_dB, max_dB),
-                #     lut=pg.colormap.get('viridis').getLookupTable(0.0, 1.0, 256)
-                # )
-                self.images[i].setImage(np.fliplr(range_azimuth[::2, :].transpose()), 
+                self.images[i].setImage(np.fliplr(range_azimuth.transpose()), 
                                     lut=pg.colormap.get('viridis').getLookupTable(0.0, 1.0, 256))
+                
+                range_azimuths.append(range_azimuth)
+                detected, range_dect, angle_dect = cfar(guard_len=2, train_len=3, p_fa=1e-8, range_azimuth=range_azimuth) 
+                detecteds.append(detected)
+
+                # ## Select top self.npeaks as detected points
+                # indices = np.argpartition(range_azimuth[:].flatten(), -self.npeaks)[-self.npeaks: ]
+                # peak_idx = np.unravel_index(indices, range_azimuth.shape)
+                # range_bins, doppler_bins = peak_idx
+                # points = []
+                # for r, d in zip(range_bins, doppler_bins):
+                #     points.append({'pos':(d, range_azimuth.shape[0]//2 - (r//2))})
+                
+                ## CAFR to select detected points
+                points = []
+                for y in range(detected.shape[0]):
+                    for x in range(detected.shape[1]):
+                        if detected[y][x] == 1:
+                            points.append({'pos':(x, range_azimuth.shape[0]-y)})
+                self.scatters[i].setData(points)
+
                 if angle == 'Azimuth':
                     if self.BEV:
                         angle_bins_full = np.linspace(-np.pi/2, np.pi/2, n_angles)
@@ -185,12 +201,21 @@ class MyApp(QtWidgets.QWidget):
                         ylin = np.array(ylin)
                         self.bev_image.setRect(QtCore.QRectF(xlin.min() * 0.5, ylin.min() * 0.5, np.ptp(xlin) * 0.5, np.ptp(ylin) * 0.5))
 
-                indices = np.argpartition(range_azimuth[:].flatten(), -self.npeaks)[-self.npeaks: ]
-                peak_idx = np.unravel_index(indices, range_azimuth.shape)
-                range_bins, doppler_bins = peak_idx
-                points = []
-                for r, d in zip(range_bins, doppler_bins):
-                    points.append({'pos':(d, range_azimuth.shape[0]//2 - (r//2))})
-                self.scatters[i].setData(points)
-                
+            # detected_radar_points = radar_points(detecteds=detecteds, angles=self.radar.angles, radar=self.radar) 
+            
+            # # Visualization (optional)
+            # img_w, img_h = cam_frame.shape[1], cam_frame.shape[0]
+            # print(img_w, img_h)
+            # detected_radar_points = np.array(detected_radar_points)
+            # # Project the radar points
+            # projected_points_cal = project_points(detected_radar_points, K_calibrated)
+            # depth_mask = np.zeros((img_h, img_w))
+            # print(depth_mask.shape)
+            # for i in range(projected_points_cal.shape[0]):
+            #     x, y, d = projected_points_cal[i]
+            #     if 0<=round(y)<=img_h and 0<=round(x)<=img_w:
+            #         depth_mask[round(y)][round(x)] = d
+
+            # self.cam_scatter.setData(projected_points_cal[:, :2])
+
             QtWidgets.QApplication.processEvents()

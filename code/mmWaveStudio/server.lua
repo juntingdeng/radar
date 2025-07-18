@@ -60,16 +60,16 @@ ar1.GetCaptureCardFPGAVersion()
 print("Initialization complete.")
 
 -- Server ---------------------------------------------------------------------
-
+-- WORK_DIR = "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test"
 function read()
-    local file = io.open("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg", "r")
+    local file = io.open("G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\code\\radar\\test\\msg", "r")
     if not file then
         return nil
     end
     local msg = file:read("*a")
     print("read msg: ", msg)
     file:close()
-    os.remove("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg")
+    os.remove("G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\code\\radar\\test\\msg")
     return msg
 end
 
@@ -79,7 +79,7 @@ while true do
     if msg == "start" then
         if running == false then
             print("Starting capture...")
-            ar1.CaptureCardConfig_StartRecord("C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\tmp.bin", 1)
+            ar1.CaptureCardConfig_StartRecord("G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\code\\radar\\test\\tmp.bin", 1)
             ar1.StartFrame()
             running = true
         else

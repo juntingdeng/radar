@@ -147,10 +147,10 @@ if __name__ == '__main__':
         "creates a file with the current datetime (.h5).")
     args = p.parse_args()
 
-    with open("config.json") as f:
+    with open("./code/radar/config.json") as f:
         cfg = json.load(f)
 
     if args.output is None:
-        args.output = datetime.now().strftime("%Y.%m.%d-%H.%M.%S") + ".h5"
+        args.output = datetime.now().strftime("./code/radar/test/%Y.%m.%d-%H.%M.%S") + ".h5"
 
     radarcollect(args, cfg)

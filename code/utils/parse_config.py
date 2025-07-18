@@ -20,7 +20,7 @@ class radarConfig:
         self.cfg_port = 4096
         self.SysSrcIP = "192.168.33.30"
         self.FpgaDextIP = "192.168.33.180"
-        self.msgfile = "C:\\Users\\BettyCheng\\NTU\\CMU-intern\\Radar\\radar\\code\\rawData\\test\\msg"
+        self.msgfile = "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\code\\radar\\test\\msg"
         self.angles = ['Elevation', 'Azimuth']
         self.range_max = LIGHT_SPEED * self.adc_start_time * self.num_adc_samples / (2 * self.chirp_slope)
 

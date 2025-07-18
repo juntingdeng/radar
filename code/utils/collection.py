@@ -92,8 +92,8 @@ class collector():
         with open(self.radar.msgfile, 'w') as f:
             f.write("start")
             print("written start.")
-
-        with tb.open_file(datetime.now().strftime("%Y.%m.%d-%H.%M.%S") + ".h5", 
+        
+        with tb.open_file(datetime.now().strftime("./code/radar/%Y.%m.%d-%H.%M.%S") + ".h5", 
                         mode='w', title='Packet file') as h5file:
             dataset = DataCollector(h5file)
             try:

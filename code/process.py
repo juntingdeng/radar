@@ -30,6 +30,7 @@ def main(args):
         thread = threading.Thread(target=obj.collect, daemon=True)
         thread.start()
     else:
+        obj = None
         allkeys = collections.defaultdict(list)
         with h5py.File(args.data_file, 'r') as f:
             packet = f['scan']['packet']
@@ -50,7 +51,7 @@ def main(args):
             print('Inconsistent adc_raw shape, adjusting...')
             adc_raw = adc_raw[:radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames]
 
-        assert adc_raw.shape[0] == radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames or 0 < nframes <radar.num_frames
+        # assert adc_raw.shape[0] == radar.num_adc_samples*radar.num_chirps*radar.num_rx*radar.num_frames or 0 < nframes <radar.num_frames
         print(f'{nframes} received')
         adc_raw = adc_raw[ :radar.num_adc_samples*radar.num_chirps*radar.num_rx*nframes]
         adc_frames = adc_raw.reshape(nframes, radar.num_chirps, radar.num_rx, radar.num_adc_samples)
@@ -74,10 +75,12 @@ def main(args):
 
 def args_parser():
     args = argparse.ArgumentParser()
-    args.add_argument('--cfg_file', default='./mmWaveStudio/server.lua')
+    args.add_argument('--cfg_file', default='./code/mmWaveStudio/server.lua')
     args.add_argument('--data_file', default=None, type=str)
     args.add_argument('--live', action='store_true')
+    args.add_argument('--cfar', action='store_true')
     args.add_argument('--npeaks', default=16, type=int)
+    
     return args.parse_args()
 
 if __name__ == '__main__':

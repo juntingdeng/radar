@@ -5,7 +5,7 @@ import json
 import subprocess
 
 
-with open("./radar/config.json") as f:
+with open("./code/radar/config.json") as f:
     cfg = json.load(f)
 
 script = os.path.join(os.path.dirname(__file__), "../mmWaveStudio/", "server.lua")

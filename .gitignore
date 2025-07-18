@@ -1,4 +1,4 @@
-*/rawData
+/rawData
 /processed
 /figures
 /video
@@ -11,7 +11,13 @@
 *.zip
 *.h5
 *.pyc
+*.txt
+*.bin
+*csv
 */radical-main
 */rover-main/rover-main/docs
 */rover-main/rover-main/lidar
 */rover-main/rover-main/processing
+/robotcar-dataset-sdk-master
+*/nuscenes
+/dart
