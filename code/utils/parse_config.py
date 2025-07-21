@@ -22,7 +22,6 @@ class radarConfig:
         self.FpgaDextIP = "192.168.33.180"
         self.msgfile = "G:\\My Drive\\CMU\\Research\\3DImage\\sensor\\TI\\setup_test\\code\\radar\\test\\msg"
         self.angles = ['Elevation', 'Azimuth']
-        self.range_max = LIGHT_SPEED * self.adc_start_time * self.num_adc_samples / (2 * self.chirp_slope)
 
     def load_cfg(self, cfg_file):
         ## Parse radar configuration from .lua file
@@ -94,7 +93,6 @@ class radarConfig:
         
         self.num_ant = [self.num_tx, self.num_rx*self.num_tx]
         self.steering_vectors =[compute_steering_vector(num_ant=n, angle_res=1.0, angle_rng=90) for n in self.num_ant]
-        # self.range_max = max(range_ticks_real)
         attrs = ','.join([f'({key}: {val:.2f})' for key, val in vars(self).items() if isinstance(val, (int, float))])
         print(attrs)
         
