@@ -1,0 +1,32 @@
+{
+  "datasets": {
+    "YYYY.MM.DD": {
+      "description": "All captures collected on this day (shared folder on disk)",
+      "data_root": "/path/to/external/drive/data_collect_mobile/YYYY.MM.DD",
+      "captures": {
+        "session_a": {
+          "description": "First radar/lidar pair of the day",
+          "radar_h5": "{data_root}/radar/YYYY.MM.DD-HH.MM.SS.h5",
+          "lidar_pcap": "{data_root}/lidar/your_capture_a.pcap",
+          "lidar_metadata": "{data_root}/lidar/your_capture_a.json",
+          "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
+          "sync_csv": "res/YYYY.MM.DD/session_a/sync_pairs.csv",
+          "sync_summary": "res/YYYY.MM.DD/session_a/sync_summary.json",
+          "out_video": "res/YYYY.MM.DD/session_a/sync_data.mp4",
+          "cache_dir": "res/YYYY.MM.DD/session_a/viz_cache"
+        },
+        "session_b": {
+          "description": "Second radar/lidar pair from the same day",
+          "radar_h5": "{data_root}/radar/another_capture.h5",
+          "lidar_pcap": "{data_root}/lidar/your_capture_b.pcap",
+          "lidar_metadata": "{data_root}/lidar/your_capture_b.json",
+          "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
+          "sync_csv": "res/YYYY.MM.DD/session_b/sync_pairs.csv",
+          "sync_summary": "res/YYYY.MM.DD/session_b/sync_summary.json",
+          "out_video": "res/YYYY.MM.DD/session_b/sync_data.mp4",
+          "cache_dir": "res/YYYY.MM.DD/session_b/viz_cache"
+        }
+      }
+    }
+  }
+}

@@ -80,7 +80,7 @@ RSTD.NetStart()
 ar1.FullReset()
 ar1.SOPControl(2)
 
-ar1.Connect(8, 115200, 1000)
+ar1.Connect(13, 115200, 1000)
 
 ar1.Calling_IsConnected()
 ar1.deviceVariantSelection("XWR2944")
@@ -118,7 +118,7 @@ ar1.CaptureCardConfig_Mode(1, 2, 1, 2, 3, 30)
 ar1.CaptureCardConfig_PacketDelay(25)
 ar1.GetCaptureCardFPGAVersion()
 
-ar1.CaptureCardConfig_StartRecord("D:\\rawData\\cap7\\data.bin", 1)
+ar1.CaptureCardConfig_StartRecord("D:\\rawData\\cap10\\data.bin", 1)
 ar1.StartFrame()
 
 -- Exit mmWaveStudio.exe

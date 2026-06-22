@@ -1,0 +1,27 @@
+{
+  "radar_frames": 62260,
+  "lidar_frames": 7552,
+  "matched_pairs": 6578,
+  "radar_packets_per_frame": 45,
+  "radar_adc_packets_per_frame": 270,
+  "timeline_overlap_s": 805.1090202331543,
+  "estimated_lidar_to_radar_offset_s": 0.15000000000000036,
+  "estimated_lidar_time_scale": 1.0,
+  "estimated_skew_ppm": 0.0,
+  "fit_median_error_s": null,
+  "median_abs_delta_ms": 9.963393211364746,
+  "p95_abs_delta_ms": 33.301484584808314,
+  "radar_t_start": 1778462894.1693437,
+  "radar_t_end": 1778463699.278364,
+  "lidar_t_start": 1778462879.6690001,
+  "lidar_t_end": 1778463792.4680002,
+  "offset_at_search_boundary": false,
+  "skew_at_search_boundary": false,
+  "best_unmatched_median_abs_delta_ms": 12.193918228149414,
+  "timing_drift": {
+    "delta_ms_drift_slope_ms_per_s": -0.018589435820964305,
+    "delta_ms_drift_intercept_ms": 7.6850503906748475,
+    "delta_ms_drift_total_ms": -14.901254576135214,
+    "implied_skew_ppm_from_pairs": 18.589435820964304
+  }
+}

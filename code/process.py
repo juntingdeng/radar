@@ -33,11 +33,22 @@ def main(args):
         obj = None
         allkeys = collections.defaultdict(list)
         with h5py.File(args.data_file, 'r') as f:
-            packet = f['scan']['packet']
+            packet = f['scan']['packet'][:486119,] # 180sec: 486119
+            print("shape:", packet.shape)
+            print("dtype:", packet.dtype)
+            print("fields:", packet.dtype.names)
+
             packet_num = packet['packet_num']
             packet_t = packet['t']
             byte_count = packet['byte_count']
-            packet_data = np.array(packet['packet_data'], dtype=np.int16)
+            packet_data = np.array(packet['packet_data'], dtype=np.uint16).view(np.int16)
+
+        #     packet_data = packet['packet_data']
+        # chunk_size = 1000
+        # for start in range(0, packet_data.shape[0], chunk_size):
+        #     end = min(start + chunk_size, packet_data.shape[0])
+        #     packet_data[start:end] = packet_data[start:end].astype(np.int16)
+
 
         adc_raw = packet_data.reshape(-1)
         print(f'packet_data shape: {packet_data.shape}')
@@ -72,6 +83,7 @@ def main(args):
     win.resize(800, 500)
     win.show()
     app.exec_()
+    np.save('./processed/test/all_bev_180s.npy', np.array(win.all_bevs))
 
 def args_parser():
     args = argparse.ArgumentParser()

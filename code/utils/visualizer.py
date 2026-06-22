@@ -81,6 +81,7 @@ class MyApp(QtWidgets.QWidget):
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
         self.timer.start(100)
+        self.all_bevs = []
 
     def update(self):
         adc_data = None
@@ -197,6 +198,7 @@ class MyApp(QtWidgets.QWidget):
                             lut=lut_with_white
                         )
                             # levels=(min_dB, max_dB),
+                        self.all_bevs.append(bev_cartesian.T)
                         xlin = np.array(xlin)
                         ylin = np.array(ylin)
                         self.bev_image.setRect(QtCore.QRectF(xlin.min() * 0.5, ylin.min() * 0.5, np.ptp(xlin) * 0.5, np.ptp(ylin) * 0.5))

@@ -184,3 +184,47 @@ def compute_doppler_resolution(num_chirps, bandwidth, chirp_interval, num_tx):
     doppler_resolution = lmbda / (2 * num_chirps * num_tx * chirp_interval)
 
     return doppler_resolution
+
+
+import numpy as np
+
+def polar2xyz(rae_cube, ranges, angles, xrng, yrng, zrng):
+    # rae_cube: power at location [range, azimuth, elevation]
+
+    xyz_cube = np.zeros((xrng.shape[0], yrng.shape[0], zrng.shape[0]))
+    for xi in range(xyz_cube.shape[0]):
+        x = xrng[xi]
+        for yi in range(xyz_cube.shape[1]):
+            y = yrng[yi]
+            for zi in range(xyz_cube.shape[2]):
+                z = zrng[zi]
+
+                rng = np.sqrt(x*x + y*y + z*z)
+                azim = np.arctan(y/(x+1e-6))
+                elev = np.arcsin(z/(rng+1e-6))
+
+                rng_idxs = loacteIdx(ranges, rng)
+                azim_idxs = loacteIdx(angles[0], azim)
+                elev_idxs = loacteIdx(angles[1], elev)
+                
+                mean_pw = 0
+                for idr in rng_idxs:
+                    for ida in azim_idxs:
+                        for ide in elev_idxs:
+                            mean_pw += rae_cube[idr][ida][ide]
+
+                xyz_cube[xi][yi][zi] = mean_pw/8
+    
+    return xyz_cube
+
+
+def loacteIdx(arr, target): # return idx0 and idx1 that arr[idx0] <= val < arr[idx1]
+    ans = []
+    i=0
+    while i < len(arr):
+        if arr[i] <= target:
+            i +=1
+        elif arr[i] > target:
+            ans = [i-1, i]
+            return ans
+    return [-1, -1]

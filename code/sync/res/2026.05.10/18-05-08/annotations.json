@@ -1,0 +1,26 @@
+{
+  "coordinate_frame": "sensor_topdown",
+  "units": "m",
+  "x_axis": "lateral_y",
+  "y_axis": "forward_x",
+  "objects": {
+    "0": [
+      {
+        "id": "demo_0",
+        "label": "object",
+        "lateral": [-1.5, 1.5],
+        "forward": [4.0, 10.0],
+        "color": "lime"
+      }
+    ],
+    "189": [
+      {
+        "id": "demo_189",
+        "label": "object",
+        "lateral": [-2.0, 2.0],
+        "forward": [5.0, 12.0],
+        "color": "cyan"
+      }
+    ]
+  }
+}
