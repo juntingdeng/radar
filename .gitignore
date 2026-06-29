@@ -30,3 +30,4 @@
 *_cache/
 **/*_cache/
 code/sync/res/
+*.json

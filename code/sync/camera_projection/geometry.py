@@ -182,8 +182,14 @@ def depth_to_sensor_points(
     calib: CameraCalibration,
     *,
     stride: int = 4,
+    min_height_m: Optional[float] = None,
 ) -> dict:
-    """Project a whole depth frame into the shared sensor frame with pixel subsampling."""
+    """Project a whole depth frame into the shared sensor frame with pixel subsampling.
+
+    min_height_m: if set, drop points whose sensor-Z (up axis) is below this threshold.
+    Use to remove ground-plane returns; tune based on camera mounting height above ground
+    (e.g. -1.0 for a camera at ~1 m height keeps objects while cutting most road returns).
+    """
     if stride <= 0:
         raise ValueError("stride must be > 0")
     depth_arr = np.asarray(depth)
@@ -202,10 +208,15 @@ def depth_to_sensor_points(
         }
     cam_pts = pixels_depth_to_camera(u[valid], v[valid], z[valid], calib)
     sensor_pts = transform_points(cam_pts, calib.camera_to_sensor)
+    z_valid = z[valid]
+    if min_height_m is not None:
+        keep = sensor_pts[:, 2] >= float(min_height_m)
+        sensor_pts = sensor_pts[keep]
+        z_valid = z_valid[keep]
     return {
         "forward": sensor_pts[:, 0].astype(np.float64),
         "lateral": sensor_pts[:, 1].astype(np.float64),
-        "depth_m": z[valid].astype(np.float64),
+        "depth_m": z_valid.astype(np.float64),
     }
 
 

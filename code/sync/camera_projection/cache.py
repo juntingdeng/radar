@@ -99,6 +99,25 @@ class ProjectionCache:
         }
         return stable_hash(payload)
 
+    def key_for_bag_depth_frame(
+        self,
+        *,
+        bag_path: str | Path,
+        depth_topic: str,
+        frame_idx: int,
+        stride: int,
+    ) -> str:
+        payload = {
+            "version": 1,
+            "kind": "camera_projection_bag_frame_points",
+            "calibration_sha256": self.calibration_sha256,
+            "bag": file_fingerprint(bag_path),
+            "depth_topic": str(depth_topic),
+            "frame_idx": int(frame_idx),
+            "stride": int(stride),
+        }
+        return stable_hash(payload)
+
     def path_for_key(self, key: str) -> Path:
         return self.points_dir / key[:2] / f"{key}.npz"
 

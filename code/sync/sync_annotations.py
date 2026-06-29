@@ -94,7 +94,9 @@ def build_sync_pair_maps(
     return lidar_to_pair, radar_to_pair, pair_to_lidar
 
 
-def boxes_for_pair(data: dict, pair_idx: int) -> List[dict]:
+def boxes_for_pair(data: dict, pair_idx) -> List[dict]:
+    if pair_idx is None:
+        return []
     return list(data.get("objects", {}).get(str(int(pair_idx)), []))
 
 

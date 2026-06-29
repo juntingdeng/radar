@@ -25,7 +25,7 @@ PathLike = Union[str, Path]
 DEFAULT_COLOR_TOPIC = "/device_0/sensor_1/Color_0/image/data"
 DEFAULT_DEPTH_TOPIC = "/device_0/sensor_0/Depth_0/image/data"
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -123,15 +123,24 @@ def list_bag_topics(bag_path: PathLike) -> List[Tuple[str, str]]:
 def iter_topic_messages(
     bag_path: PathLike,
     topic: str,
+    *,
+    start_ns: Optional[int] = None,
 ) -> Iterator[Tuple[int, bytes]]:
-    """Yield ``(bag_record_ts_ns, raw_message)`` for one topic."""
+    """Yield ``(bag_record_ts_ns, raw_message)`` for one topic.
+
+    Pass ``start_ns`` (bag-record timestamp in nanoseconds) to seek to that
+    point via the bag's chunk index instead of scanning from the beginning.
+    """
     Reader = _require_rosbags()
     bag_path = Path(bag_path)
     with Reader(bag_path) as reader:
         connections = [c for c in reader.connections if c.topic == topic]
         if not connections:
             raise KeyError(f"Topic not found in bag: {topic}")
-        for _conn, ts, raw in reader.messages(connections=connections):
+        kwargs: dict = {"connections": connections}
+        if start_ns is not None:
+            kwargs["start"] = int(start_ns)
+        for _conn, ts, raw in reader.messages(**kwargs):
             yield int(ts), bytes(raw)
 
 
@@ -227,27 +236,37 @@ def index_image_topics_single_pass(
     *,
     progress_every: int = 2000,
 ) -> Dict[str, np.ndarray]:
-    """Index header timestamps for multiple topics in one bag scan."""
+    """Index header timestamps and bag-record timestamps for multiple topics in one bag scan.
+
+    Returns a dict keyed by topic name containing header timestamps (float64 seconds).
+    Also stores ``<topic>__bag_ts_ns`` (int64 nanoseconds) for chunk-level seeking.
+    """
     Reader = _require_rosbags()
     bag_path = Path(bag_path)
     topic_set = set(topics)
-    buckets: Dict[str, List[float]] = {t: [] for t in topics}
+    hdr_buckets: Dict[str, List[float]] = {t: [] for t in topics}
+    bag_buckets: Dict[str, List[int]] = {t: [] for t in topics}
     counts = {t: 0 for t in topics}
 
     with Reader(bag_path) as reader:
         connections = [c for c in reader.connections if c.topic in topic_set]
         if not connections:
             raise KeyError(f"No requested topics in bag: {topics}")
-        for conn, _ts, raw in reader.messages(connections=connections):
+        for conn, ts, raw in reader.messages(connections=connections):
             topic = conn.topic
             hdr_t, _h, _w, _enc, _off = parse_ros1_image_header(raw)
-            buckets[topic].append(hdr_t)
+            hdr_buckets[topic].append(hdr_t)
+            bag_buckets[topic].append(int(ts))
             counts[topic] += 1
             total = sum(counts.values())
             if progress_every > 0 and total % progress_every == 0:
                 print(f"  indexed {total} image messages...", flush=True)
 
-    return {t: np.asarray(buckets[t], dtype=np.float64) for t in topics}
+    result: Dict[str, np.ndarray] = {}
+    for t in topics:
+        result[t] = np.asarray(hdr_buckets[t], dtype=np.float64)
+        result[t + "__bag_ts_ns"] = np.asarray(bag_buckets[t], dtype=np.int64)
+    return result
 
 
 def build_camera_index(
@@ -266,11 +285,15 @@ def build_camera_index(
     indexed = index_image_topics_single_pass(bag_path, [color_topic, depth_topic])
     color_ts = indexed[color_topic]
     depth_ts = indexed[depth_topic]
+    color_bag_ts_ns = indexed[color_topic + "__bag_ts_ns"]
+    depth_bag_ts_ns = indexed[depth_topic + "__bag_ts_ns"]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output_path,
         color_ts=color_ts,
         depth_ts=depth_ts,
+        color_bag_ts_ns=color_bag_ts_ns,
+        depth_bag_ts_ns=depth_bag_ts_ns,
         color_topic=np.asarray(color_topic),
         depth_topic=np.asarray(depth_topic),
         bag_signature=json.dumps(bag_file_signature(bag_path)),
@@ -297,9 +320,23 @@ def load_camera_index(
             )
         build_camera_index(bag_path, output_path=index_path)
     data = np.load(index_path, allow_pickle=False)
+
+    # Rebuild if old index is missing bag-record timestamps (version 1).
+    if "color_bag_ts_ns" not in data:
+        if bag_path is None:
+            raise FileNotFoundError(
+                f"Camera index at {index_path} is version 1 (no bag-record timestamps). "
+                "Pass bag_path= to rebuild."
+            )
+        print("Camera index is v1 (no bag-record timestamps); rebuilding for fast seeking...")
+        build_camera_index(bag_path, output_path=index_path)
+        return load_camera_index(index_path, bag_path=bag_path, rebuild=False)
+
     meta = {
         "color_ts": np.asarray(data["color_ts"], dtype=np.float64),
         "depth_ts": np.asarray(data["depth_ts"], dtype=np.float64),
+        "color_bag_ts_ns": np.asarray(data["color_bag_ts_ns"], dtype=np.int64),
+        "depth_bag_ts_ns": np.asarray(data["depth_bag_ts_ns"], dtype=np.int64),
         "color_topic": str(np.asarray(data["color_topic"]).item()),
         "depth_topic": str(np.asarray(data["depth_topic"]).item()),
         "index_path": str(index_path.resolve()),

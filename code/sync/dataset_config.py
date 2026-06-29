@@ -18,6 +18,9 @@ DATASET_FIELDS = (
     "lidar_metadata",
     "camera_bag",
     "camera_index",
+    "camera_sync_csv",
+    "calibration_json",
+    "annotations_path",
     "cfg_file",
     "sync_csv",
     "sync_summary",
@@ -39,6 +42,9 @@ _SYNC_RELATIVE_FIELDS = frozenset(
         "out_video",
         "cache_dir",
         "camera_index",
+        "camera_sync_csv",
+        "calibration_json",
+        "annotations_path",
     }
 )
 

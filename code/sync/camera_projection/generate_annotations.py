@@ -1,4 +1,12 @@
-"""CLI: generate initial object proposal annotations directly from D435 depth."""
+"""CLI: generate initial object proposal annotations directly from D435 depth.
+
+Depth can come from two sources (mutually exclusive):
+  --camera_bag  : read depth frames directly from a ROS bag file (preferred)
+  --depth_dir   : read pre-extracted NPY/NPZ depth files from disk (legacy)
+
+When --camera_bag is used the depth topic is scanned once in sequence; only
+frames referenced in the camera_sync_csv are projected.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +30,17 @@ from annotations import empty_annotations, load_annotations, save_annotations  #
 from cache import ProjectionCache  # noqa: E402
 from geometry import depth_to_sensor_points, load_calibration, load_depth, robust_bounds  # noqa: E402
 
+try:
+    from camera_compat import (  # noqa: E402
+        DEFAULT_DEPTH_TOPIC,
+        iter_topic_messages,
+        parse_ros1_image,
+    )
+    _CAMERA_COMPAT = True
+except ImportError:
+    DEFAULT_DEPTH_TOPIC = "/device_0/sensor_0/Depth_0/image/data"
+    _CAMERA_COMPAT = False
+
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -29,13 +48,33 @@ def build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument("--camera_sync_csv", required=True)
     p.add_argument("--calibration_json", required=True)
-    p.add_argument("--depth_dir", required=True)
     p.add_argument("--output_annotations", required=True)
     p.add_argument("--existing_annotations", default=None)
+
+    # --- depth source (one of the two is required) ---
+    src = p.add_mutually_exclusive_group()
+    src.add_argument(
+        "--camera_bag",
+        default=None,
+        help="ROS bag containing raw depth frames (preferred; reads depth_topic directly).",
+    )
+    src.add_argument(
+        "--depth_dir",
+        default=None,
+        help="Directory of pre-extracted depth NPY/NPZ files (legacy).",
+    )
+
+    p.add_argument(
+        "--depth_topic",
+        default=DEFAULT_DEPTH_TOPIC,
+        help="Depth image topic in the ROS bag (only used with --camera_bag).",
+    )
     p.add_argument(
         "--depth_pattern",
         default="depth_{camera_idx:06d}.npy",
-        help="Pattern relative to depth_dir. Fields: camera_idx, pair_idx, radar_idx, lidar_idx.",
+        help="Filename pattern relative to depth_dir. "
+        "Fields: camera_idx, pair_idx, radar_idx, lidar_idx. "
+        "(only used with --depth_dir)",
     )
     p.add_argument("--cache_dir", default=None)
     p.add_argument("--refresh_cache", action="store_true")
@@ -63,10 +102,16 @@ def read_camera_sync(path: str | Path) -> List[dict]:
     rows: List[dict] = []
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
+            # Prefer camera_depth_idx (from sync_camera_pairs.py); fall back to camera_idx.
+            depth_idx_key = "camera_depth_idx" if "camera_depth_idx" in row else "camera_idx"
+            depth_idx = int(row[depth_idx_key]) if row.get(depth_idx_key, "") != "" else -1
+            if depth_idx < 0:
+                continue
             rows.append(
                 {
                     "pair_idx": int(row["pair_idx"]),
-                    "camera_idx": int(row["camera_idx"]),
+                    "camera_idx": int(row["camera_idx"]) if row.get("camera_idx", "") != "" else depth_idx,
+                    "camera_depth_idx": depth_idx,
                     "radar_idx": int(row["radar_idx"]),
                     "lidar_idx": int(row["lidar_idx"]),
                 }
@@ -85,7 +130,7 @@ def depth_path_for_row(args, row: dict) -> Optional[Path]:
     return p if p.is_file() else None
 
 
-def cache_dir(args) -> Path:
+def _cache_dir(args) -> Path:
     if args.cache_dir:
         return Path(args.cache_dir)
     return Path(args.output_annotations).resolve().parent / "camera_projection_cache"
@@ -207,34 +252,50 @@ def proposals_from_points(points: dict, args) -> List[dict]:
     return out
 
 
-def main() -> None:
-    args = build_argparser().parse_args()
-    calib = load_calibration(args.calibration_json)
-    rows = read_camera_sync(args.camera_sync_csv)
-    rows = rows if args.max_pairs < 0 else rows[: args.max_pairs]
-    annotations = (
-        load_annotations(args.existing_annotations)
-        if args.existing_annotations
-        else empty_annotations()
-    )
-    objects = annotations.setdefault("objects", {})
-    projection_cache = None
-    if not args.no_cache:
-        projection_cache = ProjectionCache(
-            cache_dir(args),
-            calibration_json=args.calibration_json,
-            refresh=args.refresh_cache,
+def _add_proposals(
+    objects: dict,
+    pair_idx: int,
+    camera_idx: int,
+    points: dict,
+    args,
+    replace_generated: bool,
+) -> int:
+    """Project points into proposals and append to objects[pair_idx]. Returns count added."""
+    boxes = list(objects.get(str(pair_idx), []))
+    if replace_generated and str(pair_idx) in objects:
+        boxes = [b for b in boxes if str(b.get("source")) != "camera_depth_cluster"]
+    proposals = proposals_from_points(points, args)
+    for prop_i, prop in enumerate(proposals):
+        boxes.append(
+            {
+                "id": f"depth_cluster_{camera_idx:06d}_{prop_i:03d}",
+                "label": args.label,
+                "lateral": prop["lateral"],
+                "forward": prop["forward"],
+                "color": args.color,
+                "source": "camera_depth_cluster",
+                "camera_idx": camera_idx,
+                "n_depth_points": prop["n_depth_points"],
+                "median_depth_m": prop["median_depth_m"],
+            }
         )
+    if boxes:
+        objects[str(pair_idx)] = boxes
+    return len(proposals)
 
+
+def _process_from_dir(args, rows, calib, annotations, projection_cache) -> tuple[int, int]:
+    """Legacy path: read pre-extracted depth files from disk."""
+    objects = annotations.setdefault("objects", {})
     generated = 0
-    skipped_missing_depth = 0
+    skipped = 0
     depth_cache: Dict[Path, object] = {}
     for row in rows:
         pair_idx = int(row["pair_idx"])
         camera_idx = int(row["camera_idx"])
         depth_path = depth_path_for_row(args, row)
         if depth_path is None:
-            skipped_missing_depth += 1
+            skipped += 1
             continue
 
         points = None
@@ -255,47 +316,148 @@ def main() -> None:
             if projection_cache is not None and cache_key is not None:
                 projection_cache.save_points(cache_key, **points)
 
-        boxes = list(objects.get(str(pair_idx), []))
-        if args.replace_generated and str(pair_idx) in objects:
-            boxes = [
-                b for b in boxes if str(b.get("source")) != "camera_depth_cluster"
-            ]
-        proposals = proposals_from_points(points, args)
-        for prop_i, prop in enumerate(proposals):
-            boxes.append(
-                {
-                    "id": f"depth_cluster_{camera_idx:06d}_{prop_i:03d}",
-                    "label": args.label,
-                    "lateral": prop["lateral"],
-                    "forward": prop["forward"],
-                    "color": args.color,
-                    "source": "camera_depth_cluster",
-                    "camera_idx": camera_idx,
-                    "n_depth_points": prop["n_depth_points"],
-                    "median_depth_m": prop["median_depth_m"],
-                }
+        generated += _add_proposals(
+            objects, pair_idx, camera_idx, points, args,
+            replace_generated=args.replace_generated,
+        )
+    return generated, skipped
+
+
+def _process_from_bag(args, rows, calib, annotations, projection_cache) -> tuple[int, int]:
+    """Primary path: read depth frames directly from the ROS bag."""
+    if not _CAMERA_COMPAT:
+        raise ImportError(
+            "camera_compat not found. Install rosbags: pip install rosbags"
+        )
+    objects = annotations.setdefault("objects", {})
+    bag_path = Path(args.camera_bag)
+
+    # Build lookup: depth_frame_idx -> list of (pair_idx, camera_idx)
+    needed: Dict[int, List[tuple[int, int]]] = {}
+    for row in rows:
+        depth_idx = int(row["camera_depth_idx"])
+        if depth_idx < 0:
+            continue
+        needed.setdefault(depth_idx, []).append(
+            (int(row["pair_idx"]), int(row["camera_idx"]))
+        )
+
+    if not needed:
+        return 0, len(rows)
+
+    # Check cache for all needed frames first.
+    uncached: set[int] = set()
+    cached_points: Dict[int, dict] = {}
+    if projection_cache is not None:
+        for depth_idx in needed:
+            key = projection_cache.key_for_bag_depth_frame(
+                bag_path=bag_path,
+                depth_topic=args.depth_topic,
+                frame_idx=depth_idx,
+                stride=args.stride,
             )
-            generated += 1
-        if boxes:
-            objects[str(pair_idx)] = boxes
+            pts = projection_cache.load_points(key)
+            if pts is not None:
+                cached_points[depth_idx] = pts
+            else:
+                uncached.add(depth_idx)
+    else:
+        uncached = set(needed.keys())
+
+    # Scan bag once for all uncached depth frames.
+    if uncached:
+        max_needed = max(uncached)
+        print(
+            f"Scanning bag depth topic ({args.depth_topic}) for "
+            f"{len(uncached)} uncached frames (up to frame {max_needed})..."
+        )
+        bag_points: Dict[int, dict] = {}
+        for i, (_bag_ts, raw) in enumerate(iter_topic_messages(bag_path, args.depth_topic)):
+            if i > max_needed:
+                break
+            if i not in uncached:
+                continue
+            img = parse_ros1_image(raw)
+            pts = depth_to_sensor_points(img.data, calib, stride=args.stride)
+            bag_points[i] = pts
+            if projection_cache is not None:
+                key = projection_cache.key_for_bag_depth_frame(
+                    bag_path=bag_path,
+                    depth_topic=args.depth_topic,
+                    frame_idx=i,
+                    stride=args.stride,
+                )
+                projection_cache.save_points(key, **pts)
+                projection_cache.record_miss()
+        cached_points.update(bag_points)
+
+    # Generate proposals from projected points.
+    generated = 0
+    skipped = 0
+    for depth_idx, pairs in needed.items():
+        pts = cached_points.get(depth_idx)
+        if pts is None:
+            skipped += len(pairs)
+            continue
+        for pair_idx, camera_idx in pairs:
+            generated += _add_proposals(
+                objects, pair_idx, camera_idx, pts, args,
+                replace_generated=args.replace_generated,
+            )
+    return generated, skipped
+
+
+def main() -> None:
+    args = build_argparser().parse_args()
+
+    if args.camera_bag is None and args.depth_dir is None:
+        raise SystemExit(
+            "Provide either --camera_bag (read from ROS bag) "
+            "or --depth_dir (pre-extracted depth files)."
+        )
+
+    calib = load_calibration(args.calibration_json)
+    rows = read_camera_sync(args.camera_sync_csv)
+    rows = rows if args.max_pairs < 0 else rows[: args.max_pairs]
+
+    annotations = (
+        load_annotations(args.existing_annotations)
+        if args.existing_annotations
+        else empty_annotations()
+    )
+
+    projection_cache = None
+    if not args.no_cache:
+        projection_cache = ProjectionCache(
+            _cache_dir(args),
+            calibration_json=args.calibration_json,
+            refresh=args.refresh_cache,
+        )
+
+    if args.camera_bag:
+        generated, skipped = _process_from_bag(args, rows, calib, annotations, projection_cache)
+        source_desc = f"bag {Path(args.camera_bag).name} / {args.depth_topic}"
+    else:
+        generated, skipped = _process_from_dir(args, rows, calib, annotations, projection_cache)
+        source_desc = f"depth_dir {args.depth_dir}"
 
     save_annotations(annotations, args.output_annotations)
+
     if projection_cache is not None:
         projection_cache.write_manifest(
             {
                 "mode": "depth_cluster_generation",
                 "camera_sync_csv": str(Path(args.camera_sync_csv)),
-                "depth_dir": str(Path(args.depth_dir)),
-                "depth_pattern": args.depth_pattern,
+                "source": source_desc,
                 "stride": int(args.stride),
                 "output_annotations": str(Path(args.output_annotations)),
                 "generated": int(generated),
-                "skipped_missing_depth": int(skipped_missing_depth),
+                "skipped": int(skipped),
             }
         )
     print(
         f"Generated {generated} depth-cluster proposals -> {args.output_annotations} "
-        f"(missing depth for {skipped_missing_depth} pairs)."
+        f"(skipped {skipped} frames with no depth)."
     )
     if projection_cache is not None:
         print(

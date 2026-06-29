@@ -12,6 +12,9 @@
           "lidar_metadata": "{data_root}/lidar/20260510_2127_59_OS-0-128_122519000479.json",
           "camera_bag": "{data_root}/camera/20260510_212819.bag",
           "camera_index": "res/2026.05.10/18-05-08/camera_index.npz",
+          "camera_sync_csv": "res/2026.05.10/18-05-08/camera_sync_pairs.csv",
+          "calibration_json": "res/2026.05.10/18-05-08/d435_calibration.json",
+          "annotations_path": "res/2026.05.10/18-05-08/annotations.json",
 
           "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
           "sync_csv": "res/2026.05.10/18-05-08/sync_pairs.csv",
