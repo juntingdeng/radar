@@ -12,8 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_config import add_dataset_arguments, apply_dataset_config
-from sync_utils import (
+from lib.dataset_config import add_dataset_arguments, apply_dataset_config
+from lib.sync_utils import (
     compute_pair_timing_drift,
     fit_time_affine,
     fit_time_offset,
@@ -109,7 +109,7 @@ def _radar_sync_packets_per_frame(args) -> tuple[int, int]:
     import sys
     from pathlib import Path
 
-    code_root = Path(__file__).resolve().parents[1]
+    code_root = Path(__file__).resolve().parents[2]
     if str(code_root) not in sys.path:
         sys.path.insert(0, str(code_root))
     from utils.parse_config import radarConfig

@@ -14,7 +14,7 @@ Writes ``camera_sync_pairs.csv`` with added columns:
 
 Run once per capture after ``sync_radar_lidar.py``::
 
-    python sync/sync_camera_pairs.py -d 2026.05.10/18-05-08 --fit_offset
+    python sync/src/sync_camera_pairs.py -d 2026.05.10/18-05-08 --fit_offset
 """
 
 from __future__ import annotations
@@ -27,14 +27,14 @@ from typing import List, Optional
 
 import numpy as np
 
-from camera_compat import (
+from lib.camera_io import (
     DEFAULT_COLOR_TOPIC,
     DEFAULT_DEPTH_TOPIC,
     build_camera_index,
     load_camera_index,
 )
-from dataset_config import add_dataset_arguments, apply_dataset_config
-from sync_utils import (
+from lib.dataset_config import add_dataset_arguments, apply_dataset_config
+from lib.sync_utils import (
     fit_time_affine,
     fit_time_offset,
     format_unix_utc,
@@ -439,9 +439,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.camera_output_json:
         json_path = Path(args.camera_output_json)
         json_path.parent.mkdir(parents=True, exist_ok=True)
+        # Preserve existing fields (e.g. radar_packets_per_frame written by sync_radar_lidar.py)
+        # so that overwriting the same summary path doesn't erase radar sync info.
+        existing: dict = {}
+        if json_path.is_file():
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        merged = {**existing, **summary}
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-        print(f"Wrote: {args.output_json}")
+            json.dump(merged, f, indent=2)
+        print(f"Wrote: {args.camera_output_json}")
 
     return 0
 

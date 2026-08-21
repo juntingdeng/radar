@@ -31,7 +31,7 @@ from cache import ProjectionCache  # noqa: E402
 from geometry import depth_to_sensor_points, load_calibration, load_depth, robust_bounds  # noqa: E402
 
 try:
-    from camera_compat import (  # noqa: E402
+    from lib.camera_io import (  # noqa: E402
         DEFAULT_DEPTH_TOPIC,
         iter_topic_messages,
         parse_ros1_image,

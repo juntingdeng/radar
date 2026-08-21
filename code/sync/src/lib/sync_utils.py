@@ -16,9 +16,10 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-_SYNC_DIR = Path(__file__).resolve().parent
-if str(_SYNC_DIR) not in sys.path:
-    sys.path.insert(0, str(_SYNC_DIR))
+# Put code/sync/src/ on the path so sibling libs import as `lib.<module>`.
+_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 
 @dataclass
@@ -150,7 +151,7 @@ def try_read_ouster_scan_timestamps(
 ) -> Optional[np.ndarray]:
     """Read scan timestamps using Ouster SDK when available; otherwise return None."""
     try:
-        from ouster_compat import (
+        from lib.lidar_io import (
             close_source,
             get_ouster_api,
             iter_scans,
@@ -166,7 +167,7 @@ def try_read_ouster_scan_timestamps(
     source = open_pcap_scan_source(pcap_path, metadata_json_path)
     timestamps: List[float] = []
     try:
-        from ouster_compat import scan_source_length
+        from lib.lidar_io import scan_source_length
 
         n_hint = scan_source_length(source)
         if n_hint is not None:

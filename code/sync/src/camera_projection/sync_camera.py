@@ -16,7 +16,7 @@ if str(_SYNC_DIR) not in sys.path:
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
-from sync_utils import fit_time_affine, fit_time_offset  # noqa: E402
+from lib.sync_utils import fit_time_affine, fit_time_offset  # noqa: E402
 from timestamps import (  # noqa: E402
     infer_camera_timestamps,
     match_camera_to_sync_pairs,

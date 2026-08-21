@@ -18,7 +18,7 @@ Mirrors `sync_radar_lidar.py`: estimates a clock offset (or full affine skew) be
 nearest-neighbor matching against lidar timestamps.
 
 ```bash
-python code/sync/sync_camera_pairs.py \
+python code/sync/src/sync_camera_pairs.py \
   -d 2026.05.10/18-05-08 \
   --fit_offset \
   --max_delta_ms 50
@@ -27,7 +27,7 @@ python code/sync/sync_camera_pairs.py \
 Or with explicit paths:
 
 ```bash
-python code/sync/sync_camera_pairs.py \
+python code/sync/src/sync_camera_pairs.py \
   --sync_csv  code/sync/res/2026.05.10/18-05-08/sync_pairs.csv \
   --camera_bag /path/to/d435.bag \
   --fit_offset \
@@ -83,7 +83,7 @@ Scans the depth topic once, projects each needed frame, and writes initial
 unlabeled boxes with `label: "object"`.
 
 ```bash
-python code/sync/camera_projection/generate_annotations.py \
+python code/sync/src/camera_projection/generate_annotations.py \
   --camera_sync_csv code/sync/res/2026.05.10/18-05-08/camera_sync_pairs.csv \
   --calibration_json /path/to/d435_to_lidar_calibration.json \
   --camera_bag /path/to/d435.bag \
@@ -111,7 +111,7 @@ Detection JSON can be a list, COCO-like `annotations`, or `frames[].detections`.
 detection needs a frame id (`camera_idx`, `frame_idx`, or `image_id`) and `bbox`.
 
 ```bash
-python code/sync/camera_projection/project_detections.py \
+python code/sync/src/camera_projection/project_detections.py \
   --camera_sync_csv code/sync/res/2026.05.10/18-05-08/camera_sync_pairs.csv \
   --detections_json /path/to/d435_detections.json \
   --calibration_json /path/to/d435_to_lidar_calibration.json \
@@ -161,13 +161,13 @@ Useful cache controls:
 
 ```bash
 # 1. Sync radar + lidar
-python code/sync/sync_radar_lidar.py -d 2026.05.10/18-05-08 --fit_offset
+python code/sync/src/sync_radar_lidar.py -d 2026.05.10/18-05-08 --fit_offset
 
 # 2. Sync camera to lidar (reads directly from .bag)
-python code/sync/sync_camera_pairs.py -d 2026.05.10/18-05-08 --fit_offset
+python code/sync/src/sync_camera_pairs.py -d 2026.05.10/18-05-08 --fit_offset
 
 # 3. Generate depth-cluster proposals (reads depth directly from .bag)
-python code/sync/camera_projection/generate_annotations.py \
+python code/sync/src/camera_projection/generate_annotations.py \
   --camera_sync_csv code/sync/res/2026.05.10/18-05-08/camera_sync_pairs.csv \
   --calibration_json /path/to/calibration.json \
   --camera_bag /path/to/d435.bag \

@@ -4,40 +4,36 @@ This folder contains scripts to synchronize:
 - TI AWR2944 + DCA1000 radar capture (`.h5`, from `collect.py`)
 - Ouster OS0 lidar capture (`.pcap`)
 
-## Scripts
+## Layout
 
-- `extract_timestamps.py`  
-  Extract packet/frame timestamps and save to `.npz` for debugging.
+Pipeline (`src/`):
+- `sync_radar_lidar.py` — build nearest-neighbor radar↔lidar frame matches →
+  `sync_pairs.csv` + `sync_summary.json`.
+- `sync_camera_pairs.py` — attach camera frames onto `sync_pairs.csv` rows.
+- `make_video.py` — data-inspection MP4: radar BEV + lidar BEV + camera per matched pair.
+- `lib/` — shared library modules, imported as `lib.<module>`:
+  - `dataset_config.py`, `sync_utils.py` — dataset profiles + timestamp/sync helpers.
+  - `camera_io.py` — Intel RealSense D435 ROS bag reader (RGB + depth).
+  - `lidar_io.py` — Ouster OS0 pcap/SDK reader.
+  - `bev_render.py` — radar range-azimuth→BEV + lidar `LidarScanReader` + frame cache.
+  - `sync_annotations.py` — top-down box annotation overlay/IO.
+- `calibration/` — camera/radar → lidar extrinsic calibration tools.
+- `camera_projection/` — depth → top-down object-proposal annotations.
 
-- `sync_radar_lidar.py`  
-  Build nearest-neighbor frame matches and save:
-  - `sync_pairs.csv` (frame pairs)
-  - `sync_summary.json` (offset and error stats)
+Diagnostics (`dev/`):
+- `extract_timestamps.py` — dump radar/lidar timestamp arrays for sanity checks.
+- `visualize_sync.py` — timing/sync-quality plots (timelines, index mapping, delta_ms).
+- `{camera,lidar,radar}_frame_testbench.ipynb` — interactive per-frame viewers.
 
-- `visualize_sync.py`  
-  Timing/sync quality plots (timelines, index mapping, delta_ms). Use `--cfg_file` so
-  `packets_per_frame` matches the sync run.
-
-- `visualize_sync_video.py`  
-  **Data inspection video**: radar range-azimuth heatmap + lidar BEV point cloud per
-  matched pair, streamed directly to MP4 (no per-frame PNG dump).
-
-- `sync_utils.py`  
-  Shared timestamp parsing and matching helpers.
-
-- `camera_compat.py`  
-  Intel RealSense R435 ROS bag reader (RGB + depth `sensor_msgs/Image`).
-
-- `sync_camera_pairs.py`  
-  Map camera frames onto existing `sync_pairs.csv` rows via `radar_t`.
-
-- `camera_frame_testbench.ipynb`  
-  Interactive RGB + depth viewer keyed by sync pair index.
+`datasets.json`, `res/`, `data/` stay at the folder root. Config (`datasets.json`)
+and outputs (`res/`) resolve relative to this `code/sync/` directory regardless of
+where the scripts live. Radar DSP (`utils.parse_config`, `utils.capon`, `utils.cfar`)
+is shared from `code/utils/`.
 
 ## Basic Usage
 
 ```bash
-python code/sync/sync_radar_lidar.py \
+python code/sync/src/sync_radar_lidar.py \
   --radar_h5 /path/to/radar.h5 \
   --lidar_pcap /path/to/lidar.pcap \
   --fit_offset \
@@ -48,7 +44,7 @@ python code/sync/sync_radar_lidar.py \
 ## Visualize Sync Results
 
 ```bash
-python code/sync/visualize_sync.py \
+python code/sync/dev/visualize_sync.py \
   --sync_csv ./code/sync/sync_pairs.csv \
   --radar_h5 /path/to/radar.h5 \
   --lidar_pcap /path/to/lidar.pcap \
@@ -64,7 +60,7 @@ This command saves a **single summary PNG** that already includes **all matched 
 To export one PNG per synchronized pair:
 
 ```bash
-python code/sync/visualize_sync.py \
+python code/sync/dev/visualize_sync.py \
   --sync_csv ./code/sync/sync_pairs.csv \
   --radar_h5 /path/to/radar.h5 \
   --lidar_pcap /path/to/lidar.pcap \
@@ -77,7 +73,7 @@ python code/sync/visualize_sync.py \
 To create an MP4 from all exported pair PNGs in the same run:
 
 ```bash
-python code/sync/visualize_sync.py \
+python code/sync/dev/visualize_sync.py \
   --sync_csv ./code/sync/sync_pairs.csv \
   --radar_h5 /path/to/radar.h5 \
   --lidar_pcap /path/to/lidar.pcap \
@@ -98,7 +94,7 @@ Requires Ouster SDK 0.16+ (`pip install ouster-sdk`). Uses `ouster.sdk.core` and
 optional if it sits beside the `.pcap` with a matching prefix.
 
 ```bash
-python code/sync/visualize_sync_video.py \
+python code/sync/src/make_video.py \
   --sync_csv ./code/sync/res/sync_pairs.csv \
   --sync_summary ./code/sync/res/sync_summary.json \
   --radar_h5 /path/to/radar.h5 \
@@ -152,11 +148,11 @@ After radar/lidar sync, attach camera frames (uses image header timestamps vs `r
 
 ```bash
 cd code
-python3 ./sync/sync_camera_pairs.py -d 2026.05.10/18-05-08 --rebuild_index
+python3 ./sync/src/sync_camera_pairs.py -d 2026.05.10/18-05-08 --rebuild_index
 ```
 
 This adds `camera_color_idx`, `camera_depth_idx`, `camera_t`, `camera_delta_ms` to
 `sync_pairs.csv` and caches timestamps in `camera_index.npz`. First bag scan on USB
 can take several minutes.
 
-Interactive viewer: open `sync/camera_frame_testbench.ipynb`.
+Interactive viewer: open `sync/dev/camera_frame_testbench.ipynb`.

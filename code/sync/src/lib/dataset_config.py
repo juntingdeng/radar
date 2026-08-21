@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-_SYNC_DIR = Path(__file__).resolve().parent
+# This module lives in code/sync/src/lib/; datasets.json and res/ live in code/sync/.
+_SYNC_DIR = Path(__file__).resolve().parents[2]
 _CODE_ROOT = _SYNC_DIR.parent
 
 # argparse dest -> datasets.json key

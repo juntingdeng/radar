@@ -11,8 +11,15 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from dataset_config import add_dataset_arguments, apply_dataset_config
-from sync_utils import (
+# This diagnostic lives in code/sync/dev/; pipeline modules live in code/sync/src/.
+import sys
+
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from lib.dataset_config import add_dataset_arguments, apply_dataset_config
+from lib.sync_utils import (
     lidar_packets_to_frames,
     radar_packets_to_frames,
     read_lidar_packet_timestamps_from_pcap,
@@ -145,7 +152,8 @@ def _packets_per_frame_from_cfg(cfg_file: str, override: int | None) -> int:
     import sys
     from pathlib import Path
 
-    code_root = Path(__file__).resolve().parents[1]
+    # dev/ is code/sync/dev/, so code/ is parents[2].
+    code_root = Path(__file__).resolve().parents[2]
     if str(code_root) not in sys.path:
         sys.path.insert(0, str(code_root))
     from utils.parse_config import radarConfig

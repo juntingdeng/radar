@@ -120,6 +120,48 @@ def list_bag_topics(bag_path: PathLike) -> List[Tuple[str, str]]:
         return [(c.topic, c.msgtype) for c in reader.connections]
 
 
+def read_camera_infos(bag_path: PathLike) -> Dict[str, dict]:
+    """Read the first ``sensor_msgs/CameraInfo`` per stream from a RealSense bag.
+
+    Returns e.g. ``{"color": {...}, "depth": {...}}`` where each value has
+    ``fx, fy, cx, cy, width, height, distortion_model, distortion, source_topic``.
+    Streams are keyed by "color"/"depth" from the topic name (else the topic).
+    """
+    try:
+        from rosbags.highlevel import AnyReader
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "Reading camera_info requires the 'rosbags' package. "
+            "Install with: pip install rosbags"
+        ) from exc
+
+    out: Dict[str, dict] = {}
+    with AnyReader([Path(bag_path)]) as reader:
+        conns = [c for c in reader.connections if c.msgtype.endswith("CameraInfo")]
+        if not conns:
+            raise KeyError("No sensor_msgs/CameraInfo topics found in bag.")
+        want = {c.topic for c in conns}
+        got: set = set()
+        for conn, _ts, raw in reader.messages(connections=conns):
+            if conn.topic in got:
+                continue
+            m = reader.deserialize(raw, conn.msgtype)
+            k = [float(x) for x in m.K]  # row-major 3x3
+            low = conn.topic.lower()
+            key = "depth" if "depth" in low else ("color" if "color" in low else conn.topic)
+            out[key] = {
+                "fx": k[0], "fy": k[4], "cx": k[2], "cy": k[5],
+                "width": int(m.width), "height": int(m.height),
+                "distortion_model": str(m.distortion_model),
+                "distortion": [float(x) for x in m.D],
+                "source_topic": conn.topic,
+            }
+            got.add(conn.topic)
+            if got >= want:
+                break
+    return out
+
+
 def iter_topic_messages(
     bag_path: PathLike,
     topic: str,

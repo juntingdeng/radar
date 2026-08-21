@@ -1,28 +1,28 @@
 {
   "datasets": {
-    "2026.05.10": {
-      "description": "Mobile collection 2026-05-10 (Seagate external drive)",
-      "data_root": "/Volumes/Seagate Portable Drive/data_collect_mobile/2026.05.10",
+    "2026.05.08": {
+      "description": "Mobile collection 2026-05-08 (copied locally to code/sync/data)",
+      "data_root": "/Users/juntingdeng/Library/CloudStorage/GoogleDrive-juntingd@andrew.cmu.edu/My Drive/CMU/Research/3DImage/sensor/TI/setup_test/code/sync/data/2026.05.08",
       "captures": {
-        "18-05-08": {
-          "description": "Radar 18:05:08 + lidar 18:05:01",
+        "17-34-27": {
+          "description": "Capture 17-34-27",
 
-          "radar_h5": "{data_root}/radar/2026.05.10-21.28.12.h5",
-          "lidar_pcap": "{data_root}/lidar/20260510_2127_59_OS-0-128_122519000479.pcap",
-          "lidar_metadata": "{data_root}/lidar/20260510_2127_59_OS-0-128_122519000479.json",
-          "camera_bag": "{data_root}/camera/20260510_212819.bag",
-          "camera_index": "res/2026.05.10/18-05-08/camera_index.npz",
-          "camera_sync_csv": "res/2026.05.10/18-05-08/camera_sync_pairs.csv",
-          "calibration_json": "res/2026.05.10/18-05-08/d435_calibration.json",
-          "annotations_path": "res/2026.05.10/18-05-08/annotations.json",
+          "radar_h5": "{data_root}/radar/2026.05.08-17.34.27.h5",
+          "lidar_pcap": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.pcap",
+          "lidar_metadata": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.json",
+          "camera_bag": "{data_root}/camera/20260508_173455.bag",
+          "camera_index": "res/2026.05.08/17-34-27/camera_index.npz",
+          "camera_sync_csv": "res/2026.05.08/17-34-27/camera_sync_pairs.csv",
+          "calibration_json": "res/2026.05.08/17-34-27/d435_calibration.json",
+          "annotations_path": "res/2026.05.08/17-34-27/annotations.json",
 
           "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
-          "sync_csv": "res/2026.05.10/18-05-08/sync_pairs.csv",
-          "sync_summary": "res/2026.05.10/18-05-08/sync_summary.json",
-          "output_csv": "res/2026.05.10/18-05-08/sync_pairs.csv",
-          "output_json": "res/2026.05.10/18-05-08/sync_summary.json",
-          "out_video": "res/2026.05.10/18-05-08/sync_data.mp4",
-          "cache_dir": "res/2026.05.10/18-05-08/viz_cache"
+          "sync_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
+          "sync_summary": "res/2026.05.08/17-34-27/sync_summary.json",
+          "output_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
+          "output_json": "res/2026.05.08/17-34-27/sync_summary.json",
+          "out_video": "res/2026.05.08/17-34-27/sync_data.mp4",
+          "cache_dir": "res/2026.05.08/17-34-27/viz_cache"
         }
       }
     }

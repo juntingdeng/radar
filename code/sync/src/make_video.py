@@ -1,8 +1,9 @@
-"""Render synchronized radar range-azimuth + lidar BEV side-by-side as MP4."""
+"""Render synchronized radar + lidar BEV + camera color side-by-side as MP4."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 import time
@@ -20,15 +21,21 @@ _SYNC_DIR = Path(__file__).resolve().parent
 if str(_SYNC_DIR) not in sys.path:
     sys.path.insert(0, str(_SYNC_DIR))
 
-_CODE_ROOT = Path(__file__).resolve().parents[1]
+_CODE_ROOT = Path(__file__).resolve().parents[2]
 if str(_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(_CODE_ROOT))
 
 from utils.parse_config import radarConfig  # noqa: E402
 
-from dataset_config import add_dataset_arguments, apply_dataset_config  # noqa: E402
-from sync_utils import read_radar_packet_timestamps  # noqa: E402
-from sync_viz_data import (  # noqa: E402
+from lib.camera_io import (  # noqa: E402
+    DEFAULT_COLOR_TOPIC,
+    iter_topic_messages,
+    load_camera_index,
+    parse_ros1_image,
+)
+from lib.dataset_config import add_dataset_arguments, apply_dataset_config  # noqa: E402
+from lib.sync_utils import read_radar_packet_timestamps  # noqa: E402
+from lib.bev_render import (  # noqa: E402
     CANONICAL_SCENE_FORWARD_RANGE,
     CANONICAL_SCENE_LATERAL_RANGE,
     DEFAULT_SCENE_FORWARD_RANGE,
@@ -59,7 +66,7 @@ from sync_viz_data import (  # noqa: E402
 )
 
 
-def _load_sync_packets_per_frame(args, radar_h5: str) -> int:
+def _load_sync_packets_per_frame(args, radar_h5: str, *, fallback: Optional[int] = None) -> int:
     if args.sync_packets_per_frame is not None:
         return int(args.sync_packets_per_frame)
     if args.sync_summary:
@@ -71,6 +78,9 @@ def _load_sync_packets_per_frame(args, radar_h5: str) -> int:
         radar_frames = int(summary.get("radar_frames", 0))
         if radar_frames > 0:
             return infer_sync_packets_per_frame(radar_h5, radar_frames)
+    if fallback is not None:
+        print(f"  packets_per_frame: {fallback} (from cfg_file; sync_summary has no radar info)")
+        return int(fallback)
     raise ValueError(
         "Need --sync_packets_per_frame or --sync_summary with radar_packets_per_frame."
     )
@@ -143,6 +153,79 @@ def _filter_pair_ids_by_lidar_bounds(renderer: "SyncVideoRenderer", pair_ids: Li
     return _filter_pair_ids_by_lidar_count(renderer.lidar_idx, pair_ids, renderer.n_lidar)
 
 
+class CameraLoader:
+    """Load camera color frames from a ROS bag, preloading in one sequential scan."""
+
+    def __init__(
+        self,
+        bag_path: str,
+        camera_sync_csv: str,
+        camera_index_path: Optional[str] = None,
+        color_topic: str = DEFAULT_COLOR_TOPIC,
+    ):
+        self.bag_path = Path(bag_path)
+        self.color_topic = color_topic
+        self.pair_to_color_idx: Dict[int, int] = {}
+        self._frame_cache: Dict[int, np.ndarray] = {}
+
+        with open(camera_sync_csv, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                pair_idx = int(row["pair_idx"])
+                ci_key = "camera_color_idx" if "camera_color_idx" in row else "camera_idx"
+                ci_str = row.get(ci_key, "").strip()
+                # Skip unmatched rows (camera_color_idx == -1); storing them would
+                # poison max_idx and trigger a full bag scan that loads nothing.
+                if ci_str and int(ci_str) >= 0:
+                    self.pair_to_color_idx[pair_idx] = int(ci_str)
+
+        print(
+            f"CameraLoader: {len(self.pair_to_color_idx)} pairs mapped "
+            f"from {camera_sync_csv}"
+        )
+
+    def preload(self, pair_ids: List[int]) -> None:
+        """Load all color frames for pair_ids via one sequential bag scan."""
+        needed_indices = sorted(
+            idx
+            for idx in (
+                {self.pair_to_color_idx[p] for p in pair_ids if p in self.pair_to_color_idx}
+                - self._frame_cache.keys()
+            )
+            if idx >= 0
+        )
+        if not needed_indices:
+            print(
+                "Camera: no matched color frames for the selected pairs "
+                "(or all already cached); skipping bag scan."
+            )
+            return
+        max_idx = max(needed_indices)
+        needed_set = set(needed_indices)
+        print(
+            f"Camera: scanning bag for {len(needed_indices)} color frames "
+            f"(up to frame {max_idx}; this may take several minutes)..."
+        )
+        t0 = time.perf_counter()
+        loaded = 0
+        for i, (_, raw) in enumerate(iter_topic_messages(self.bag_path, self.color_topic)):
+            if i > max_idx:
+                break
+            if i in needed_set:
+                img = parse_ros1_image(raw)
+                self._frame_cache[i] = np.array(img.data, copy=True)
+                loaded += 1
+                if loaded % 500 == 0:
+                    print(f"  camera {loaded}/{len(needed_indices)} frames loaded...", flush=True)
+        elapsed = time.perf_counter() - t0
+        print(f"Camera preload done: {loaded} frames in {elapsed:.0f}s.")
+
+    def get_frame(self, pair_idx: int) -> Optional[np.ndarray]:
+        color_idx = self.pair_to_color_idx.get(pair_idx)
+        if color_idx is None:
+            return None
+        return self._frame_cache.get(color_idx)
+
+
 class RadarLoader:
     """Radar-only loader and validation (no lidar)."""
 
@@ -156,7 +239,13 @@ class RadarLoader:
         self.radar = radarConfig()
         self.radar.parse_radar(cfg_file=cfg_path)
         self.cfg_path = cfg_path
-        self.sync_ppf = _load_sync_packets_per_frame(args, args.radar_h5)
+        # sync_radar_lidar.py uses sync_ppf = adc_ppf // 6 by default.
+        # Fall back to that formula so we don't silently use the full adc_ppf
+        # (which would map radar_idx -> wrong adc_frame, making radar look random).
+        _adc_ppf = int(self.radar.packets_per_frame)
+        self.sync_ppf = _load_sync_packets_per_frame(
+            args, args.radar_h5, fallback=max(1, _adc_ppf // 6)
+        )
         self.radar_processing = str(getattr(args, "radar_processing", "legacy"))
         self.use_radar_bev = use_radar_bev_panel(args)
         self.canonical_lateral_range, self.canonical_forward_range = canonical_scene_bounds()
@@ -275,6 +364,8 @@ class SyncVideoRenderer:
         self._warned_shape = False
         self._pair_cache: Dict[int, Tuple[np.ndarray, np.ndarray, str]] = {}
         self._diag_reader: Optional[LidarScanReader] = None
+        self.camera: Optional[CameraLoader] = None
+        self._camera_cache: Dict[int, Optional[np.ndarray]] = {}
 
     def open_lidar(self, *, needed_lidar_indices: Optional[List[int]] = None) -> None:
         needed = needed_lidar_indices or []
@@ -284,7 +375,13 @@ class SyncVideoRenderer:
             and self.frame_cache.all_lidar_cached(needed)
         ):
             extra = self.frame_cache.load_disk_manifest_extra()
-            self.n_lidar = int(extra.get("n_lidar_scans", max(needed) + 1))
+            stored = extra.get("n_lidar_scans")
+            # Only trust the stored value if it's larger than what we actually need;
+            # a stale max(needed)+1 from a prior cache-hit run would be too small.
+            if stored is not None and int(stored) > max(needed):
+                self.n_lidar = int(stored)
+            else:
+                self.n_lidar = None  # unknown — don't filter
             print(
                 f"Using lidar disk cache ({len(needed)} unique scans); "
                 "skipping PCAP open."
@@ -346,8 +443,13 @@ class SyncVideoRenderer:
             if self.frame_cache.enabled and any(
                 self.frame_cache.has_lidar(i) for i in unique_lidar
             ):
+                # Fresh = recompute from PCAP (bypass cache) at the SAME canonical
+                # bounds + display crop as load_bev_display, so shapes are comparable.
                 fresh_fn = lambda lidx, r=reader, v=view: lidar_panel_for_imshow(
-                    r.get_panel(lidx, view=v), v
+                    self._crop_display(
+                        r.panel_from_scan_idx(lidx, view=v, **self.cache_lidar_kw), v
+                    ),
+                    v,
                 )
 
         return print_lidar_diagnosis(
@@ -366,6 +468,19 @@ class SyncVideoRenderer:
         }
         return titles.get(str(self.args.lidar_view), "Lidar")
 
+    def _crop_display(self, panel: np.ndarray, view: str) -> np.ndarray:
+        """Crop a canonical top-down panel to the display bounds (no-op otherwise)."""
+        if lidar_view_is_topdown(view):
+            return crop_topdown_panel(
+                panel,
+                panel_lateral=self.canonical_lateral_range,
+                panel_forward=self.canonical_forward_range,
+                display_lateral=self.lateral_range,
+                display_forward=self.forward_range,
+                res=DEFAULT_SCENE_GRID_RES,
+            )
+        return panel
+
     def _load_lidar_panel(self, lidx: int) -> np.ndarray:
         view = str(self.args.lidar_view)
         if self.lidar_reader is not None:
@@ -381,16 +496,7 @@ class SyncVideoRenderer:
             raise RuntimeError(
                 f"Lidar scan {lidx} ({view}) not in cache and PCAP is not open."
             )
-        if lidar_view_is_topdown(view):
-            return crop_topdown_panel(
-                panel,
-                panel_lateral=self.canonical_lateral_range,
-                panel_forward=self.canonical_forward_range,
-                display_lateral=self.lateral_range,
-                display_forward=self.forward_range,
-                res=DEFAULT_SCENE_GRID_RES,
-            )
-        return panel
+        return self._crop_display(panel, view)
 
     def load_pair(self, pid: int) -> Optional[Tuple[np.ndarray, np.ndarray, str]]:
         if pid in self._pair_cache:
@@ -527,9 +633,19 @@ class SyncVideoRenderer:
                     flush=True,
                 )
 
+        if self.camera is not None:
+            self.camera.preload(valid_ids)
+
         extra = {}
-        if self.n_lidar is not None:
+        if self.lidar_reader is not None and self.n_lidar is not None:
+            # Only persist when n_lidar came from the PCAP itself; a cache-hit run
+            # sets n_lidar to max(needed)+1 which would corrupt future runs.
             extra["n_lidar_scans"] = int(self.n_lidar)
+        else:
+            # Cache-hit path: preserve whatever reliable value is already on disk.
+            existing = self.frame_cache.load_disk_manifest_extra()
+            if "n_lidar_scans" in existing:
+                extra["n_lidar_scans"] = int(existing["n_lidar_scans"])
         self.frame_cache.save_manifest(extra)
         print(f"Pre-cache done ({len(self._pair_cache)} pairs in memory).")
 
@@ -546,6 +662,7 @@ class SyncVideoRenderer:
         aspect: str = "auto",
         xlabel: Optional[str] = None,
         ylabel: Optional[str] = None,
+        flip_x: bool = False,
     ):
         data = np.nan_to_num(data, nan=0.0)
         if im is None or im.get_array().shape != data.shape:
@@ -565,7 +682,12 @@ class SyncVideoRenderer:
                 extent=extent,
             )
             if extent is not None:
-                ax.set_xlim(extent[0], extent[1])
+                # flip_x inverts the lateral axis so a top-down BEV's left/right
+                # matches the forward camera (+Y is left in the sensor frame).
+                if flip_x:
+                    ax.set_xlim(extent[1], extent[0])
+                else:
+                    ax.set_xlim(extent[0], extent[1])
                 ax.set_ylim(extent[2], extent[3])
             if xlabel:
                 ax.set_xlabel(xlabel)
@@ -578,6 +700,15 @@ class SyncVideoRenderer:
             im.set_clim(*vlim)
         ax.set_title(panel_title)
         return im
+
+    def get_camera_frame(self, pid: int) -> Optional[np.ndarray]:
+        if pid in self._camera_cache:
+            return self._camera_cache[pid]
+        if self.camera is not None:
+            frame = self.camera.get_frame(pid)
+            self._camera_cache[pid] = frame
+            return frame
+        return None
 
     def radar_axis(self, panel: np.ndarray) -> dict:
         return radar_panel_axis(
@@ -665,7 +796,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--debug_png_dir", default=None, help="Save radar/lidar debug PNGs.")
     p.add_argument(
         "--cache_dir",
-        default=str(_SYNC_DIR / "res" / "viz_cache"),
+        default=str(_SYNC_DIR.parent / "res" / "viz_cache"),
         help="Disk cache for radar/lidar rendered frames (speeds up re-runs).",
     )
     p.add_argument(
@@ -682,6 +813,28 @@ def build_argparser() -> argparse.ArgumentParser:
         "--diagnose_lidar",
         action="store_true",
         help="Full lidar diagnostic: raw PCAP checksums vs BEV, cache-vs-fresh.",
+    )
+    p.add_argument(
+        "--no_flip_bev",
+        action="store_true",
+        help="Don't mirror the top-down radar/lidar panels; by default their left/right "
+        "is flipped to match the forward camera (+Y is left in the sensor frame).",
+    )
+    p.add_argument(
+        "--camera_bag",
+        default=None,
+        help="RealSense ROS bag (camera/*.bag). When set, adds a camera color panel.",
+    )
+    p.add_argument(
+        "--camera_sync_csv",
+        default=None,
+        help="camera_sync_pairs.csv (maps pair_idx -> camera_color_idx). "
+        "Required when --camera_bag is used.",
+    )
+    p.add_argument(
+        "--camera_index",
+        default=None,
+        help="Camera index .npz (timestamp cache). Auto-resolved from datasets.json if set.",
     )
     add_dataset_arguments(p)
     return p
@@ -702,6 +855,12 @@ def main() -> None:
         pair_ids = pair_ids[: args.max_frames]
     if len(pair_ids) < 2:
         raise RuntimeError(f"Only {len(pair_ids)} pairs; need at least 2.")
+    print(
+        f"Pair selection: {radar_idx.size} total pairs, "
+        f"stride={args.stride}, max_frames={args.max_frames} "
+        f"=> {len(pair_ids)} pairs to render "
+        f"(pair_idx {pair_ids[0]}..{pair_ids[-1]})"
+    )
 
     first_pid, last_pid = pair_ids[0], pair_ids[-1]
 
@@ -719,16 +878,43 @@ def main() -> None:
 
     # --- Phase 2: lidar + video ---
     renderer = SyncVideoRenderer(args, radar_loader, frame_cache)
+
+    # Wire camera loader if bag + sync CSV are provided.
+    camera_bag = getattr(args, "camera_bag", None)
+    camera_sync_csv = getattr(args, "camera_sync_csv", None)
+    if camera_bag and camera_sync_csv:
+        if not Path(camera_bag).is_file():
+            print(f"WARNING: camera_bag not found ({camera_bag}); skipping camera panel.")
+        elif not Path(camera_sync_csv).is_file():
+            print(f"WARNING: camera_sync_csv not found ({camera_sync_csv}); skipping camera panel.")
+        else:
+            renderer.camera = CameraLoader(camera_bag, camera_sync_csv)
+
     try:
         n_lidar_hint = _n_lidar_hint(args, frame_cache)
         valid_ids = _filter_pair_ids_by_lidar_count(
             renderer.lidar_idx, pair_ids, n_lidar_hint
         )
+        if len(valid_ids) != len(pair_ids):
+            print(
+                f"WARNING: lidar bounds pre-filter dropped "
+                f"{len(pair_ids) - len(valid_ids)} pairs "
+                f"(n_lidar_hint={n_lidar_hint}); {len(valid_ids)} remain."
+            )
         needed_lidar = sorted({int(renderer.lidar_idx[p]) for p in valid_ids})
         renderer.open_lidar(needed_lidar_indices=needed_lidar)
         if n_lidar_hint is None and renderer.n_lidar is not None:
+            before = len(valid_ids)
             valid_ids = _filter_pair_ids_by_lidar_bounds(renderer, valid_ids)
+            if len(valid_ids) != before:
+                print(
+                    f"WARNING: lidar bounds post-filter dropped "
+                    f"{before - len(valid_ids)} pairs "
+                    f"(n_lidar={renderer.n_lidar}); {len(valid_ids)} remain."
+                )
             needed_lidar = sorted({int(renderer.lidar_idx[p]) for p in valid_ids})
+        print(f"Valid pairs after lidar filter: {len(valid_ids)} "
+              f"=> ~{len(valid_ids)/max(1,args.video_fps):.1f}s at {args.video_fps} fps")
         if len(valid_ids) < 2:
             csv_max = int(np.max(renderer.lidar_idx))
             raise RuntimeError(
@@ -777,9 +963,12 @@ def main() -> None:
 
         renderer.precache(valid_ids)
 
+        use_camera = renderer.camera is not None
+
         if args.debug_png_dir:
             dbg = Path(args.debug_png_dir)
             dbg.mkdir(parents=True, exist_ok=True)
+            n_cols = 3 if use_camera else 2
             for tag, pid in [
                 ("first", valid_ids[0]),
                 ("mid", valid_ids[len(valid_ids) // 2]),
@@ -789,30 +978,30 @@ def main() -> None:
                 if not loaded:
                     continue
                 left, right, title = loaded
-                fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+                fig, axes = plt.subplots(1, n_cols, figsize=(6 * n_cols, 5))
                 radar_ax = renderer.radar_axis(left)
                 lidar_ax = renderer.lidar_axis()
                 lidar_vlim = lidar_panel_color_limits(right, args.lidar_view)
-                axes[0].imshow(
-                    left,
-                    origin=radar_ax["origin"],
-                    extent=radar_ax["extent"],
-                    aspect=radar_ax["aspect"],
-                    cmap="viridis",
-                )
+                _no_flip = bool(getattr(args, "no_flip_bev", False))
+                axes[0].imshow(left, origin=radar_ax["origin"], extent=radar_ax["extent"],
+                               aspect=radar_ax["aspect"], cmap="viridis")
                 axes[0].set_xlabel(radar_ax["xlabel"])
                 axes[0].set_ylabel(radar_ax["ylabel"])
-                axes[1].imshow(
-                    right,
-                    origin=lidar_ax["origin"],
-                    extent=lidar_ax["extent"],
-                    aspect=lidar_ax["aspect"],
-                    cmap="viridis",
-                    vmin=lidar_vlim[0],
-                    vmax=lidar_vlim[1],
-                )
+                if radar_ax["extent"] is not None and not _no_flip:
+                    axes[0].set_xlim(radar_ax["extent"][1], radar_ax["extent"][0])
+                axes[1].imshow(right, origin=lidar_ax["origin"], extent=lidar_ax["extent"],
+                               aspect=lidar_ax["aspect"], cmap="viridis",
+                               vmin=lidar_vlim[0], vmax=lidar_vlim[1])
                 axes[1].set_xlabel(lidar_ax["xlabel"])
                 axes[1].set_ylabel(lidar_ax["ylabel"])
+                if lidar_ax["extent"] is not None and not _no_flip:
+                    axes[1].set_xlim(lidar_ax["extent"][1], lidar_ax["extent"][0])
+                if use_camera:
+                    cam = renderer.get_camera_frame(pid)
+                    if cam is not None:
+                        axes[2].imshow(cam.astype(np.float32) / 255.0)
+                    axes[2].set_title("Camera (RGB)")
+                    axes[2].axis("off")
                 fig.suptitle(title)
                 fig.savefig(dbg / f"debug_{tag}_pair{pid}.png", dpi=120)
                 plt.close(fig)
@@ -831,81 +1020,78 @@ def main() -> None:
                 f"(cache grid forward 0..{CANONICAL_SCENE_FORWARD_RANGE[1]:.0f})"
             )
 
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        n_cols = 3 if use_camera else 2
+        fig_w = 6 * n_cols
+        fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, 5))
+
+        cam0 = renderer.get_camera_frame(valid_ids[0]) if use_camera else None
+        _cam0_disp = cam0.astype(np.float32) / 255.0 if cam0 is not None else np.zeros((480, 848, 3), np.float32)
+
+        # Flip the lateral axis of top-down BEV panels so their left/right matches
+        # the forward camera (+Y is "left" in the sensor frame). Camera stays as-is.
+        no_flip = bool(getattr(args, "no_flip_bev", False))
+        flip_radar = radar_ax["extent"] is not None and not no_flip
+        flip_lidar = lidar_ax["extent"] is not None and not no_flip
+
         panels = {
             "im0": renderer.set_panel(
-                axes[0],
-                None,
-                left0,
-                renderer.left_vlim,
-                left_title,
-                origin=radar_ax["origin"],
-                extent=radar_ax["extent"],
-                aspect=radar_ax["aspect"],
-                xlabel=radar_ax["xlabel"],
-                ylabel=radar_ax["ylabel"],
+                axes[0], None, left0, renderer.left_vlim, left_title,
+                origin=radar_ax["origin"], extent=radar_ax["extent"],
+                aspect=radar_ax["aspect"], xlabel=radar_ax["xlabel"], ylabel=radar_ax["ylabel"],
+                flip_x=flip_radar,
             ),
             "im1": renderer.set_panel(
-                axes[1],
-                None,
-                right0,
-                renderer.lidar_vlim,
-                renderer._lidar_panel_title(),
-                origin=lidar_ax["origin"],
-                extent=lidar_ax["extent"],
-                aspect=lidar_ax["aspect"],
-                xlabel=lidar_ax["xlabel"],
-                ylabel=lidar_ax["ylabel"],
+                axes[1], None, right0, renderer.lidar_vlim, renderer._lidar_panel_title(),
+                origin=lidar_ax["origin"], extent=lidar_ax["extent"],
+                aspect=lidar_ax["aspect"], xlabel=lidar_ax["xlabel"], ylabel=lidar_ax["ylabel"],
+                flip_x=flip_lidar,
             ),
         }
+        if use_camera:
+            panels["im2"] = axes[2].imshow(_cam0_disp, aspect="auto")
+            axes[2].set_title("Camera (RGB)")
+            axes[2].axis("off")
+
         supt = fig.suptitle(title0)
 
         def update(i: int):
-            loaded = renderer.load_pair(valid_ids[i])
+            pid = valid_ids[i]
+            loaded = renderer.load_pair(pid)
             if loaded is None:
-                return panels["im0"], panels["im1"], supt
+                return list(panels.values()) + [supt]
             left, right, title = loaded
             panels["im0"] = renderer.set_panel(
-                axes[0],
-                panels["im0"],
-                left,
-                renderer.left_vlim,
-                left_title,
-                origin=radar_ax["origin"],
-                extent=radar_ax["extent"],
-                aspect=radar_ax["aspect"],
-                xlabel=radar_ax["xlabel"],
-                ylabel=radar_ax["ylabel"],
+                axes[0], panels["im0"], left, renderer.left_vlim, left_title,
+                origin=radar_ax["origin"], extent=radar_ax["extent"],
+                aspect=radar_ax["aspect"], xlabel=radar_ax["xlabel"], ylabel=radar_ax["ylabel"],
+                flip_x=flip_radar,
             )
             panels["im1"] = renderer.set_panel(
-                axes[1],
-                panels["im1"],
-                right,
-                renderer.lidar_vlim,
+                axes[1], panels["im1"], right, renderer.lidar_vlim,
                 renderer._lidar_panel_title(),
-                origin=lidar_ax["origin"],
-                extent=lidar_ax["extent"],
-                aspect=lidar_ax["aspect"],
-                xlabel=lidar_ax["xlabel"],
-                ylabel=lidar_ax["ylabel"],
+                origin=lidar_ax["origin"], extent=lidar_ax["extent"],
+                aspect=lidar_ax["aspect"], xlabel=lidar_ax["xlabel"], ylabel=lidar_ax["ylabel"],
+                flip_x=flip_lidar,
             )
+            if use_camera:
+                cam = renderer.get_camera_frame(pid)
+                if cam is not None:
+                    panels["im2"].set_data(cam.astype(np.float32) / 255.0)
             supt.set_text(title)
             if i > 0 and i % 50 == 0:
                 print(f"  anim {i}/{len(valid_ids)} | {title}")
-            return panels["im0"], panels["im1"], supt
+            return list(panels.values()) + [supt]
 
         out_video = Path(args.out_video)
         out_video.parent.mkdir(parents=True, exist_ok=True)
 
         ani = animation.FuncAnimation(
-            fig,
-            update,
-            frames=len(valid_ids),
-            interval=1000 / max(1, args.video_fps),
-            blit=False,
+            fig, update, frames=len(valid_ids),
+            interval=1000 / max(1, args.video_fps), blit=False,
         )
+        panel_desc = "radar+lidar+camera" if use_camera else "radar+lidar"
         print(
-            f"Encoding {len(valid_ids)} frames -> {out_video}\n"
+            f"Encoding {len(valid_ids)} {panel_desc} frames -> {out_video}\n"
             f"  (frames pre-cached; ffmpeg progress every 50 steps)"
         )
         ani.save(str(out_video), writer="ffmpeg", fps=max(1, args.video_fps), dpi=120)

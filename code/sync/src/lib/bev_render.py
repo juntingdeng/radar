@@ -7,17 +7,18 @@ import json
 import sys
 from pathlib import Path
 
-_SYNC_DIR = Path(__file__).resolve().parent
-if str(_SYNC_DIR) not in sys.path:
-    sys.path.insert(0, str(_SYNC_DIR))
+# Put code/sync/src/ on the path so sibling libs import as `lib.<module>`.
+_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
 
-# Allow imports from code/utils
-_CODE_ROOT = Path(__file__).resolve().parents[1]
+# Allow imports from code/utils (module is in code/sync/src/lib/, so code/ is parents[3]).
+_CODE_ROOT = Path(__file__).resolve().parents[3]
 if str(_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(_CODE_ROOT))
 
@@ -386,8 +387,8 @@ def compute_range_azimuth(
     return np.fliplr(range_azimuth)
 
 
-DEFAULT_SCENE_LATERAL_RANGE = (-40.0, 40.0)
-DEFAULT_SCENE_FORWARD_RANGE = (0.0, 20.0)
+DEFAULT_SCENE_LATERAL_RANGE = (-30.0, 30.0)
+DEFAULT_SCENE_FORWARD_RANGE = (0.0, 30.0)
 DEFAULT_SCENE_GRID_RES = 0.25
 # Fixed bounds used when writing disk cache (display can crop without rebuild).
 CANONICAL_SCENE_LATERAL_RANGE = (-40.0, 40.0)
@@ -545,7 +546,7 @@ def _prepare_scan_points(
     min_range_mm: float = 500.0,
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """Filter one scan to valid XYZ points; reflectivity matches staggered XYZ indices."""
-    from ouster_compat import scan_range_flat, scan_reflectivity_staggered, scan_to_xyz
+    from lib.lidar_io import scan_range_flat, scan_reflectivity_staggered, scan_to_xyz
 
     xyz = scan_to_xyz(metadata, scan).reshape(-1, 3)
     ranges = scan_range_flat(scan).reshape(-1)
@@ -592,7 +593,7 @@ def iter_lidar_bev_frames(
 ) -> Iterator[np.ndarray]:
     """Yield lidar BEV intensity images (one per scan) using Ouster SDK."""
     try:
-        from ouster_compat import (
+        from lib.lidar_io import (
             close_source,
             get_ouster_api,
             iter_scans,
@@ -674,7 +675,7 @@ def scan_to_range_panel(metadata: Any, scan: Any) -> np.ndarray:
 
     Row 0 is the top beam (Ouster convention); display with imshow(..., origin='upper').
     """
-    from ouster_compat import scan_reflectivity
+    from lib.lidar_io import scan_reflectivity
 
     return np.asarray(scan_reflectivity(scan, metadata), dtype=np.float32)
 
@@ -734,7 +735,7 @@ def lidar_panel_axis(
     if view in ("bev", "pointcloud"):
         return {
             "extent": scene_topdown_extent(lateral_range, forward_range),
-            "aspect": "equal",
+            "aspect": "auto",
             "xlabel": "Lateral Y (m)",
             "ylabel": "Forward X (m)",
             "origin": "lower",
@@ -760,7 +761,7 @@ def radar_panel_axis(
     if use_bev:
         return {
             "extent": scene_topdown_extent(lateral_range, forward_range),
-            "aspect": "equal",
+            "aspect": "auto",
             "xlabel": "Lateral Y (m)",
             "ylabel": "Forward X (m)",
             "origin": "lower",
@@ -1025,7 +1026,7 @@ class LidarScanReader:
         self._validate_scan_variation()
 
     def _open_source(self) -> None:
-        from ouster_compat import (
+        from lib.lidar_io import (
             close_source,
             iter_scans,
             open_pcap_scan_source,
@@ -1046,7 +1047,7 @@ class LidarScanReader:
     def _validate_scan_variation(self) -> None:
         if self._len is None or self._len < 2:
             return
-        from ouster_compat import scan_range_checksum
+        from lib.lidar_io import scan_range_checksum
 
         probe_b = min(10, self._len - 1)
         scan_a = self._get_scan_sync_order(0)
@@ -1089,7 +1090,7 @@ class LidarScanReader:
 
     def raw_fingerprint(self, scan_idx: int) -> dict:
         """Read raw LidarScan at sync-order index (bypasses BEV/disk cache)."""
-        from ouster_compat import scan_fingerprint
+        from lib.lidar_io import scan_fingerprint
 
         scan = self._get_scan_sync_order(int(scan_idx))
         return scan_fingerprint(scan)
@@ -1098,6 +1099,22 @@ class LidarScanReader:
         """Compute BEV from PCAP without using disk cache (for cache validation)."""
         scan = self._get_scan_sync_order(int(scan_idx))
         return scan_to_bev(self.metadata, scan, **bev_kw)
+
+    def points_from_scan_idx(
+        self, scan_idx: int, *, min_range_mm: float = 500.0
+    ) -> np.ndarray:
+        """Return raw (N, 3) XYZ points for one scan (X=forward, Y=lateral, Z=up).
+
+        Used by extrinsic calibration to snap a clicked BEV location to the
+        nearest real lidar return and recover its full 3D coordinates.
+        """
+        from lib.lidar_io import scan_range_flat, scan_to_xyz
+
+        scan = self._get_scan_sync_order(int(scan_idx))
+        xyz = scan_to_xyz(self.metadata, scan).reshape(-1, 3)
+        ranges = scan_range_flat(scan).reshape(-1)
+        valid = np.isfinite(xyz).all(axis=1) & (ranges >= float(min_range_mm))
+        return xyz[valid]
 
     def panel_from_scan_idx(self, scan_idx: int, view: str = "bev", **kwargs) -> np.ndarray:
         """Compute lidar panel from PCAP without disk cache."""
@@ -1125,7 +1142,7 @@ class LidarScanReader:
         return panel
 
     def close(self) -> None:
-        from ouster_compat import close_source
+        from lib.lidar_io import close_source
 
         if self._source is not None:
             close_source(self._source)
@@ -1197,11 +1214,14 @@ def print_lidar_diagnosis(
             ts_s = f"{ts:.3f}" if ts is not None else "n/a"
             cache_note = ""
             if fresh_bev is not None:
-                fresh = np.nan_to_num(fresh_bev(lidx).T, nan=0.0)
-                cache_diff = float(np.mean(np.abs(bev - fresh)))
-                cache_diffs.append(cache_diff)
-                if cache_diff > 1e-3:
-                    cache_note = f"  cache≠fresh {cache_diff:.4f}"
+                fresh = np.nan_to_num(fresh_bev(lidx), nan=0.0)
+                if fresh.shape == bev.shape:
+                    cache_diff = float(np.mean(np.abs(bev - fresh)))
+                    cache_diffs.append(cache_diff)
+                    if cache_diff > 1e-3:
+                        cache_note = f"  cache≠fresh {cache_diff:.4f}"
+                else:
+                    cache_note = f"  (fresh {fresh.shape} != cache {bev.shape}; skipped)"
             print(
                 f"  {lidx:5d} | {cksum:14d} | {ts_s:>11s} | "
                 f"{float(np.max(bev)):9.1f} | {int(np.count_nonzero(bev)):6d} | "
