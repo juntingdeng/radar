@@ -31,3 +31,5 @@
 **/*_cache/
 code/sync/res/
 *.json
+code/sync/data/
+*.docx
