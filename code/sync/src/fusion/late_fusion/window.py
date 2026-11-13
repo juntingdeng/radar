@@ -488,7 +488,8 @@ XCHK_PERSIST = 1       # TESTED AND REJECTED at 2: true objects give SPARSE cert
                        # certified every frame by real radar energy) -- persistence selects wrongly.
 XCHK_MINSCORE = 0.0    # score gate TESTED, NO EFFECT: ghost streams are HIGH-score cam FPs on radar-
                        # reflective structure (walls) -- a camera-side FP problem, not filterable here
-NEG_DECAY = 0.97       # per-miss decay, TRUST-ZONE only: measured per-object cam recall can be 13%
+NEG_DECAY = 0.97
+FLOOR = float(__import__('os').environ.get('WC_FLOOR', 0.26))       # per-miss decay, TRUST-ZONE only: measured per-object cam recall can be 13%
                        # (obj3: 7 hits / 53 in-FOV frames) -- 0.85 killed correct entries between sightings
 WARM = 15.0
 
@@ -680,7 +681,7 @@ def memory_run(win, viz=False, source="cam"):
                 if np.hypot(*d_ego) <= WRITE_RMAX and in_fov(e["p"], pose, yawc) and \
                    not any(np.hypot(*(e["p"] - c)) < ASSOC for c, _, _ in camw):
                     e["s"] *= NEG_DECAY
-                    if e["n"] >= 4: e["s"] = max(e["s"], 0.26)  # multi-confirmed: never silenced by misses
+                    if e["n"] >= 4: e["s"] = max(e["s"], FLOOR)  # multi-confirmed: never silenced by misses
             bank = [e for e in bank if e["s"] > 0.12]
         elif writes:                                            # lidar is 360: every sample re-tests all
             wc = [c for c, _, _ in writes]
@@ -841,6 +842,10 @@ RMAX_EVAL = 30.0
 EMIT_HOOK = None   # optional codec hook applied at EMISSION (the transmit point): f(e, pose, t, sc)
                    # -> (world_pos, label) possibly reconstructed through a codec, or None to drop
 NEG = 0.97
+FLOOR = float(__import__('os').environ.get('WC_FLOOR', 0.26))
+WGATE = float(__import__('os').environ.get('WC_WGATE', 0.0))    # radar write score gate
+TAU_U = float(__import__('os').environ.get('WC_TAU_U', 30.0))   # persistence for UNCONFIRMED (n<NCONF)
+NCONF = int(__import__('os').environ.get('WC_NCONF', 1))        # confirmations for full tau
 CAM_TRUST = 12.0
 WEDGE = dict(cam=(np.radians(34.0), 30.0), radar=(np.radians(90.0), 25.0), lidar=(np.pi, 30.0))
 
@@ -919,7 +924,8 @@ def compare_run(win, only=None):
                                            sc_, lb))
             if "radar" in sensors:
                 for b, sc_ in P[i]["props"]["radar"]:
-                    c = Rw @ ctr(b) + pw; live.append((c, "car", sc_)); writes.append((c, sc_, "car"))
+                    c = Rw @ ctr(b) + pw; live.append((c, "car", sc_))
+                    if sc_ >= WGATE: writes.append((c, sc_, "car"))
             if "lidar" in sensors:
                 for b, sc_ in P[i]["props"]["lidar"]:
                     c = Rw @ ctr(b) + pw; live.append((c, "car", sc_)); writes.append((c, sc_, "car"))
@@ -938,12 +944,12 @@ def compare_run(win, only=None):
                     np.hypot(*(rot(pose[2]).T @ (e["p"] - pw))) <= CAM_TRUST)
                 if trust_here and not any(np.hypot(*(e["p"] - c)) < ASSOC for c, _, _ in live):
                     e["s"] *= NEG
-                    if e["n"] >= 4: e["s"] = max(e["s"], 0.26)
+                    if e["n"] >= 4: e["s"] = max(e["s"], FLOOR)
             bank = [e for e in bank if e["s"] > 0.12]
             past_known += [c for c, _, _ in live] + [c for c, _, _ in writes]
             mem = []                                            # identical gated read
             for e in bank:
-                tau = TAU_M if e["disp"] > 1.2 else TAU_S
+                tau = TAU_M if e["disp"] > 1.2 else (TAU_S if e["n"] >= NCONF else TAU_U)
                 sc_ = e["s"] * np.exp(-(t - e["last"]) / tau)
                 if sc_ >= EMIT and not any(in_wedge(e["p"], pose, sn) for sn in readgate):
                     if EMIT_HOOK is None:

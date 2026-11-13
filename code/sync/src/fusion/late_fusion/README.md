@@ -30,7 +30,7 @@ The broader RL study (contextual bandit over probes) is in `../rl_modality/` (ow
 
 ## Temporal memory on moving windows (stage 6)
 
-Window data comes from `dev/extract_multiview_cam.py` + per-window sensor extraction
+Window data comes from `dev/extract.py multiview_cam` + per-window sensor extraction
 (windows live under `~/CMU/Research/mobile_data_local/multiview_v1/0508/win_*`).
 
 ```bash
