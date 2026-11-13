@@ -48,6 +48,17 @@ dataset profiles in `datasets.json`, diagnostics and one-off builders in `dev/`.
 
 ## The pipeline, shown
 
+### The sensor platform
+
+The mobile rig carrying all three sensors (TI AWR2944 radar · Ouster OS-0-128 lidar · Intel
+RealSense D435 camera) — side and front views:
+
+<p align="center">
+  <img src="docs/img/platform_side.jpg" height="360" alt="sensor platform, side view">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/img/platform_front.jpg" height="360" alt="sensor platform, front view">
+</p>
+
 ### Labeling on synchronized, calibrated frames (verifies stages 1–3)
 
 A minute of the labeling run: YOLO detections on the camera (left), the same objects
