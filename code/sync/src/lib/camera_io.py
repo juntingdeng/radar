@@ -216,6 +216,29 @@ def read_image_at_index(
     raise IndexError(f"frame_idx {frame_idx} out of range for topic {topic}")
 
 
+def read_extracted_image(extract_dir: PathLike, stream: str, frame_idx: int) -> np.ndarray:
+    """Read a frame from a camera dir produced by extract_camera_frames.py (fast random access, no bag seek).
+
+    ``stream="color"`` -> (H,W,3) uint8 RGB (decoded from JPEG, converted back to the bag's rgb8 convention);
+    ``stream="depth"`` -> (H,W) uint16 millimetres (lossless 16-bit PNG). Frame index matches camera_index.npz.
+    """
+    import cv2
+    extract_dir = Path(extract_dir)
+    if stream == "color":
+        p = extract_dir / "color" / f"{int(frame_idx):06d}.jpg"
+        bgr = cv2.imread(str(p), cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise FileNotFoundError(f"missing extracted color frame: {p}")
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    if stream == "depth":
+        p = extract_dir / "depth" / f"{int(frame_idx):06d}.png"
+        d = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+        if d is None:
+            raise FileNotFoundError(f"missing extracted depth frame: {p}")
+        return d
+    raise ValueError(f"stream must be 'color' or 'depth', got {stream!r}")
+
+
 def nearest_frame_index(
     query_t: float,
     frame_ts: Sequence[float],

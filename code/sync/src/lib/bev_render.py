@@ -217,6 +217,9 @@ def radar_adc_fingerprint(adc_frame: np.ndarray) -> dict:
     }
 
 
+_DOPPLER_WARNED: set = set()
+
+
 def resolve_radar_processing(
     processing: str = "legacy",
     *,
@@ -227,6 +230,9 @@ def resolve_radar_processing(
     zero_doppler_notch: Optional[bool] = None,
     zero_doppler_half_width: Optional[int] = None,
     aoa_method: Optional[str] = None,
+    doppler_mode: Optional[str] = None,
+    doppler_min_bins: Optional[int] = None,
+    array_window: Optional[str] = None,
 ) -> dict:
     """Resolve radar FFT/angle options. ``processing='ti'`` approximates TI visualizer demo."""
     mode = str(processing).lower()
@@ -241,6 +247,13 @@ def resolve_radar_processing(
         "zero_doppler_notch": False,
         "zero_doppler_half_width": 2,
         "aoa_method": "capon",
+        # Which Doppler bins feed the angle spectrum (see _select_doppler_bins).
+        "doppler_mode": "all",
+        "doppler_min_bins": 2,
+        # Amplitude taper across the virtual-array elements before beamforming.
+        # None = uniform (13 dB sidelobes); "hamming" ~ -40 dB sidelobes at a slightly
+        # wider main lobe -> collapses the sidelobe "arcs" so the target peak stands clean.
+        "array_window": None,
     }
     if mode == "ti":
         opts.update(
@@ -271,11 +284,59 @@ def resolve_radar_processing(
         opts["zero_doppler_half_width"] = int(zero_doppler_half_width)
     if aoa_method is not None:
         opts["aoa_method"] = str(aoa_method).lower()
+    if doppler_mode is not None:
+        opts["doppler_mode"] = str(doppler_mode).lower()
+    if doppler_min_bins is not None:
+        opts["doppler_min_bins"] = int(doppler_min_bins)
+    if array_window is not None:
+        opts["array_window"] = str(array_window).lower() or None
+    if opts["array_window"] not in (None, "hamming", "hanning", "hann"):
+        raise ValueError(
+            f"Unknown array_window {opts['array_window']!r}; use hamming or hanning."
+        )
     if opts["aoa_method"] not in ("capon", "dbf_nci", "dbf_coh"):
         raise ValueError(
             f"Unknown aoa_method {opts['aoa_method']!r}; use capon, dbf_nci, or dbf_coh."
         )
+    if opts["doppler_mode"] not in ("all", "moving", "static"):
+        raise ValueError(
+            f"Unknown doppler_mode {opts['doppler_mode']!r}; use all, moving, or static."
+        )
+    # 'static' asks for exactly the returns the TI MTI front-end throws away
+    # (chirp-mean clutter removal + zero-Doppler notch), which would leave an
+    # empty map. Drop those two unless the caller set them explicitly.
+    if opts["doppler_mode"] == "static":
+        undone = []
+        if opts["zero_doppler_notch"] and zero_doppler_notch is None:
+            opts["zero_doppler_notch"] = False
+            undone.append("zero-Doppler notch")
+        if opts["clutter_removal"] and clutter_removal is None:
+            opts["clutter_removal"] = False
+            undone.append("chirp-mean clutter removal")
+        if undone and "static_mti" not in _DOPPLER_WARNED:
+            _DOPPLER_WARNED.add("static_mti")
+            print(
+                f"  NOTE: doppler_mode='static' disables {' + '.join(undone)} "
+                "(they remove exactly the stationary returns this mode keeps)."
+            )
     return opts
+
+
+# CLI flag -> resolve_radar_processing keyword (shared by make_video and the calibrators).
+RADAR_PROC_ARG_MAP = {
+    "radar_doppler_mode": "doppler_mode",
+    "radar_doppler_min_bins": "doppler_min_bins",
+    "radar_aoa": "aoa_method",
+}
+
+
+def radar_processing_kwargs_from_args(args) -> dict:
+    """Per-run radar processing overrides taken from CLI args (absent flags -> defaults)."""
+    return {
+        dst: getattr(args, src)
+        for src, dst in RADAR_PROC_ARG_MAP.items()
+        if getattr(args, src, None) is not None
+    }
 
 
 def _apply_1d_window(data: np.ndarray, window: str, axis: int) -> np.ndarray:
@@ -313,14 +374,69 @@ def _adc_to_range_doppler(adc_data: np.ndarray, proc: dict) -> np.ndarray:
     return range_doppler
 
 
+def _select_doppler_bins(range_doppler: np.ndarray, proc: dict) -> np.ndarray:
+    """Keep only the Doppler bins that carry the targets of interest.
+
+    The AOA step then integrates over whatever survives here, so this is what
+    decides *which* scene the top-down heatmap shows (the display stays a
+    forward/lateral map either way):
+
+      - ``all``    every Doppler bin (default; historical behaviour).
+      - ``moving`` drop the central near-zero-velocity bins, so static clutter
+        stops dominating and a walking person/vehicle survives the integration.
+      - ``static`` keep only those central bins (walls, poles, parked cars).
+
+    ``doppler_min_bins`` is the half-width (in Doppler bins) of what counts as
+    "static". With ``aoa_method='dbf_nci'`` the retained bins are summed
+    non-coherently, i.e. a straight Doppler integration.
+    """
+    mode = str(proc.get("doppler_mode", "all"))
+    if mode == "all":
+        return range_doppler
+    n_dop = int(range_doppler.shape[2])
+    center = n_dop // 2
+    hw = max(0, int(proc.get("doppler_min_bins", 2)))
+    if mode == "moving" and proc.get("zero_doppler_notch"):
+        # Those bins are already zeroed; keeping them would only dilute the
+        # Capon covariance / add zeros to the non-coherent sum.
+        hw = max(hw, int(proc.get("zero_doppler_half_width", 0)))
+    off = np.abs(np.arange(n_dop) - center)
+    keep = off > hw if mode == "moving" else off <= hw
+    n_keep = int(keep.sum())
+    if n_keep == 0:
+        if "empty" not in _DOPPLER_WARNED:
+            _DOPPLER_WARNED.add("empty")
+            print(
+                f"  WARNING: doppler_mode={mode!r} with doppler_min_bins={hw} keeps no "
+                f"Doppler bins (of {n_dop}); using all bins instead."
+            )
+        return range_doppler
+    n_ant = int(range_doppler.shape[1])
+    if proc.get("aoa_method") == "capon" and n_keep < n_ant and "capon" not in _DOPPLER_WARNED:
+        _DOPPLER_WARNED.add("capon")
+        print(
+            f"  NOTE: doppler_mode={mode!r} leaves {n_keep} Doppler snapshot(s) for "
+            f"{n_ant} antennas — the Capon covariance is rank-deficient there. "
+            "Use --radar_aoa dbf_nci (non-coherent Doppler integration) instead."
+        )
+    return range_doppler[:, :, keep]
+
+
 def _range_azimuth_power(
     range_doppler_mean: np.ndarray,
     steering_vector: np.ndarray,
     aoa_method: str,
+    array_window: Optional[str] = None,
 ) -> np.ndarray:
     """Angle spectrum per range bin. Returns linear power (not dB)."""
     sv = np.asarray(steering_vector)
     rd = range_doppler_mean
+    if array_window:
+        # Amplitude taper across the virtual-array elements (axis=1) to suppress the
+        # -13 dB uniform-array sidelobes that otherwise smear a target into azimuth "arcs".
+        n_ant = int(rd.shape[1])
+        w = np.hamming(n_ant) if array_window == "hamming" else np.hanning(n_ant)
+        rd = rd * w[None, :, None]
     n_range = int(rd.shape[0])
     n_angles = int(sv.shape[0])
     out = np.zeros((n_range, n_angles), dtype=np.float64)
@@ -362,10 +478,15 @@ def compute_range_azimuth(
     processing:
       - ``legacy`` (default): raw FFT + Capon (matches process.py / visualizer.py).
       - ``ti``: chirp MTI + Hamming windows + zero-Doppler notch, then Capon (legacy AOA).
+
+    ``doppler_mode`` / ``doppler_min_bins`` / ``aoa_method`` (see
+    ``resolve_radar_processing``) select which Doppler bins are integrated into
+    the map — ``moving`` keeps the map top-down but built from moving targets.
     """
     proc = resolve_radar_processing(processing, **processing_kw)
     adc_data = adc_frame.astype(np.float64)
     range_doppler = _adc_to_range_doppler(adc_data, proc)
+    range_doppler = _select_doppler_bins(range_doppler, proc)
 
     if angle == "Elevation":
         range_doppler_mean = range_doppler.reshape(
@@ -379,7 +500,7 @@ def compute_range_azimuth(
 
     steering_vector = radar.steering_vectors[sv_idx]
     power = _range_azimuth_power(
-        range_doppler_mean, steering_vector, proc["aoa_method"]
+        range_doppler_mean, steering_vector, proc["aoa_method"], proc.get("array_window")
     )
     range_azimuth = np.flipud(power)
     range_azimuth = 10 * np.log10(range_azimuth + 1e-12)
@@ -534,6 +655,40 @@ def range_azimuth_to_bev(
     values = range_az.flatten()
     bev = griddata(points, values, (x_grid, y_grid), method="linear", fill_value=np.nan)
     return bev
+
+
+# --- Canonical radar-BEV rendering for calibration + verification -------------
+# One source of truth so the pick GUI, the validation overlay, and any diagnostic
+# script all show the SAME radar data at the SAME contrast. Moving-target TI chain
+# (Doppler-notched clutter removal + dbf_nci) on a fine 0.1 m grid; display clipped
+# to the 60-99.5 percentile band so the diffuse azimuth-sidelobe floor is suppressed.
+CALIB_RADAR_PROCESSING = "ti"
+CALIB_RADAR_DOPPLER_MODE = "moving"
+CALIB_RADAR_AOA = "dbf_nci"
+CALIB_RADAR_BEV_RES = 0.1
+RADAR_BEV_IMSHOW_KW = {"cmap": "viridis", "interpolation": "bilinear"}
+
+
+def radar_bev_vlimits(bev: np.ndarray, lo_pct: float = 60.0, hi_pct: float = 99.5):
+    """(vmin, vmax) for a radar BEV: clip below ``lo_pct`` (sidelobe floor) to ``hi_pct``."""
+    finite = np.isfinite(bev)
+    if not np.any(finite):
+        return None, None
+    return float(np.nanpercentile(bev, lo_pct)), float(np.nanpercentile(bev, hi_pct))
+
+
+def apply_calib_radar_defaults(args) -> None:
+    """Set the canonical radar processing on an args namespace unless already chosen.
+
+    Keeps ``--radar_doppler_mode`` / ``--radar_aoa`` overridable (e.g. ``all`` to pick
+    static reflectors) but defaults every calibration/verification path to the same
+    moving-target chain so their BEVs match.
+    """
+    args.radar_processing = getattr(args, "radar_processing", None) or CALIB_RADAR_PROCESSING
+    if getattr(args, "radar_doppler_mode", None) in (None, "all"):
+        args.radar_doppler_mode = CALIB_RADAR_DOPPLER_MODE
+    if getattr(args, "radar_aoa", None) is None:
+        args.radar_aoa = CALIB_RADAR_AOA
 
 
 def _prepare_scan_points(
@@ -821,13 +976,21 @@ class VizFrameCache:
             "show_radar_bev": bool(use_radar_bev_panel(args)),
             "lidar_view": str(getattr(args, "lidar_view", "bev")),
             "radar_processing": str(getattr(args, "radar_processing", "legacy")),
-            "radar_aoa_method": "capon",
+            "radar_aoa_method": str(getattr(args, "radar_aoa", None) or "capon"),
             "align_scene": bool(getattr(args, "align_scene", True)),
             "radar_cache_kind": "range_azimuth",
             "cache_lateral": list(CANONICAL_SCENE_LATERAL_RANGE),
             "cache_forward": list(CANONICAL_SCENE_FORWARD_RANGE),
             "cache_res": float(DEFAULT_SCENE_GRID_RES),
         }
+        # Only stamp the Doppler selection when it is non-default, so existing
+        # caches (built before the flag existed) still match.
+        dop_mode = str(getattr(args, "radar_doppler_mode", "all") or "all")
+        if dop_mode != "all":
+            manifest["radar_doppler_mode"] = dop_mode
+            manifest["radar_doppler_min_bins"] = int(
+                getattr(args, "radar_doppler_min_bins", 2)
+            )
         cache = cls(args.cache_dir, manifest, refresh=getattr(args, "refresh_cache", False))
         if cache.enabled and not cache.refresh and not cache._manifest_matches_disk():
             print("Cache manifest mismatch with inputs; missing frames will be recomputed.")
@@ -1101,20 +1264,105 @@ class LidarScanReader:
         return scan_to_bev(self.metadata, scan, **bev_kw)
 
     def points_from_scan_idx(
-        self, scan_idx: int, *, min_range_mm: float = 500.0
+        self, scan_idx: int, *, min_range_mm: float = 500.0, indexed: bool = False
     ) -> np.ndarray:
         """Return raw (N, 3) XYZ points for one scan (X=forward, Y=lateral, Z=up).
 
         Used by extrinsic calibration to snap a clicked BEV location to the
         nearest real lidar return and recover its full 3D coordinates.
+
+        ``indexed=True`` uses the PCAP's built index (``source[scan_idx]``) for random
+        access instead of sequentially advancing from the current stream position. This
+        avoids streaming the whole 0..scan_idx prefix (huge win for late scans on a large
+        PCAP), but relies on indexed access matching iter order for the SDK build in use
+        (verified for ouster-sdk 0.16.1). Prefer it for scattered/late lookups; keep the
+        default sequential path for in-order scans or SDK builds with unreliable indexing.
         """
         from lib.lidar_io import scan_range_flat, scan_to_xyz
 
-        scan = self._get_scan_sync_order(int(scan_idx))
+        if indexed:
+            from lib.lidar_io import _scan_from_scan_set
+
+            scan = _scan_from_scan_set(self._source[int(scan_idx)])
+        else:
+            scan = self._get_scan_sync_order(int(scan_idx))
         xyz = scan_to_xyz(self.metadata, scan).reshape(-1, 3)
         ranges = scan_range_flat(scan).reshape(-1)
         valid = np.isfinite(xyz).all(axis=1) & (ranges >= float(min_range_mm))
         return xyz[valid]
+
+    def range_image_from_scan_idx(
+        self,
+        scan_idx: int,
+        *,
+        min_range_mm: float = 500.0,
+        front_fov_deg: Optional[float] = None,
+    ) -> dict:
+        """Return the organized (destaggered) range image and per-pixel XYZ.
+
+        Unlike the top-down BEV, this preserves elevation as the image's vertical
+        axis, so a picker can select points at a *chosen height* (a pole's top vs
+        its base) — which is what pins the roll/pitch of the extrinsic.
+
+        Returns a dict with:
+          ``range_m``  (H, W) range in meters, 0 where invalid,
+          ``xyz``      (H, W, 3) sensor-frame XYZ (X fwd, Y lat, Z up),
+          ``refl``     (H, W) reflectivity for display,
+          ``valid``    (H, W) bool mask,
+          ``col0``     column index of the leftmost returned column (for cropping).
+        If ``front_fov_deg`` is given, columns are cropped to that horizontal FOV
+        centered on +X (forward), matching the camera's view.
+        """
+        from lib.lidar_io import (
+            destagger_array,
+            scan_range_flat,
+            scan_reflectivity_staggered,
+            scan_to_xyz,
+        )
+
+        scan = self._get_scan_sync_order(int(scan_idx))
+        xyz = np.asarray(scan_to_xyz(self.metadata, scan), dtype=np.float64)
+        H, W = xyz.shape[0], xyz.shape[1]
+        rng = scan_range_flat(scan).reshape(H, W).astype(np.float64)
+        refl = scan_reflectivity_staggered(scan).reshape(H, W).astype(np.float32)
+
+        # Destagger so column index maps to a fixed azimuth (front crop stays vertical).
+        xyz = np.dstack([destagger_array(self.metadata, xyz[:, :, k]) for k in range(3)])
+        rng = destagger_array(self.metadata, rng)
+        refl = destagger_array(self.metadata, refl)
+
+        valid = np.isfinite(xyz).all(axis=2) & (rng >= float(min_range_mm))
+        range_m = np.where(valid, rng / 1000.0, 0.0)
+
+        col0 = 0
+        # Azimuth of each column from its valid points: atan2(Y, X) about +X.
+        x, y = xyz[:, :, 0], xyz[:, :, 1]
+        az = np.where(valid, np.degrees(np.arctan2(y, x)), np.nan)  # 0 = fwd, +left
+        with np.errstate(invalid="ignore"):
+            col_az = np.nanmedian(az, axis=0)
+        if front_fov_deg is not None:
+            half = float(front_fov_deg) / 2.0
+            keep = np.where(np.abs(col_az) <= half)[0]
+            if keep.size:
+                col0 = int(keep.min())
+                sl = slice(col0, int(keep.max()) + 1)
+                xyz, range_m, refl, valid = xyz[:, sl], range_m[:, sl], refl[:, sl], valid[:, sl]
+                col_az = col_az[sl]
+        # Order columns so scene-left (+azimuth) is at col 0, matching a forward
+        # camera image. Flip xyz/range/refl/valid together so (row,col)->xyz holds.
+        fin = col_az[np.isfinite(col_az)]
+        if fin.size >= 2 and fin[0] < fin[-1]:
+            xyz, range_m, refl, valid = (
+                xyz[:, ::-1], range_m[:, ::-1], refl[:, ::-1], valid[:, ::-1],
+            )
+
+        return {
+            "range_m": range_m,
+            "xyz": xyz,
+            "refl": refl,
+            "valid": valid,
+            "col0": col0,
+        }
 
     def panel_from_scan_idx(self, scan_idx: int, view: str = "bev", **kwargs) -> np.ndarray:
         """Compute lidar panel from PCAP without disk cache."""

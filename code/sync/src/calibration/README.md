@@ -123,15 +123,34 @@ implausibly large translation.
 
 ## Re-solve without re-picking (headless)
 
-Correspondences are saved next to the calibration JSON
-(`camera_lidar_correspondences.json`, `radar_lidar_correspondences.json`).
+Correspondences are saved in a `correspondences/` folder next to the calibration
+JSON (`correspondences/camera_lidar.json`, `correspondences/radar_lidar_handpicked.json`,
+and `correspondences/radar_lidar_auto.json` for the auto-mover solve).
 Re-run the fit (e.g. after pruning a bad point by hand) without the GUI:
 
 ```bash
 python code/sync/src/calibration/calibrate_camera_lidar.py \
-  --solve_only .../camera_lidar_correspondences.json \
-  --calibration_json .../d435_calibration.json
+  --solve_only .../correspondences/camera_lidar.json \
+  --calibration_json .../calibration.json
 ```
+
+## Labeled frames + video
+
+Both calibrators record what you picked. Every completed pick re-saves the
+annotated figure (panels + the boxes/marks drawn on them) as one PNG per sync
+pair, and when the window closes the PNGs are stitched into a video in pick
+order — a quick visual record of which objects were matched.
+
+Default location: `<calibration_json dir>/calibration_labels/{camera_lidar,radar_lidar}/`
+with `pair<NNNNNN>_labeled.png` frames and `labeled_frames.mp4` (GIF if ffmpeg
+is missing).
+
+| Flag | Meaning |
+|------|---------|
+| `--label_dir DIR` | Where to write the PNGs + video |
+| `--label_video PATH` | Video path (default `<label_dir>/labeled_frames.mp4`) |
+| `--label_fps F` | Video frame rate (default 5) |
+| `--no_label_frames` | Turn the whole thing off |
 
 ## Output
 
@@ -148,6 +167,7 @@ values mean mis-picked points or too little spread.
 - `rigid_solve.py` — Umeyama 3D/2D solvers. `python rigid_solve.py --self_test`.
 - `correspondences.py` — correspondence JSON load/save.
 - `interactive.py` — shared dual-panel click picker.
+- `frame_capture.py` — labeled-frame PNG snapshots + video encoding.
 - `extrinsic_io.py` — merge a solved 4×4 into the calibration JSON.
 - `calibrate_camera_lidar.py`, `calibrate_radar_lidar.py` — the two solve entry points.
 - `derive_extrinsics.py` — derive camera↔radar from the two solves and validate.

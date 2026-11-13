@@ -196,6 +196,24 @@ def scan_reflectivity(scan: Any, metadata: Any = None):
     return refl
 
 
+def destagger_array(metadata: Any, arr: np.ndarray) -> np.ndarray:
+    """Destagger a staggered HxW (or HxWxK) field so columns map to even azimuth.
+
+    Returns the input unchanged if the SDK has no destagger (best effort).
+    """
+    arr = np.asarray(arr)
+    api = get_ouster_api()
+    if api == "modern":
+        from ouster.sdk import core  # type: ignore
+
+        if hasattr(core, "destagger"):
+            return np.asarray(core.destagger(metadata, arr))
+        return arr
+    from ouster import client  # type: ignore
+
+    return np.asarray(client.destagger(metadata, arr))
+
+
 def close_source(source: Any) -> None:
     if hasattr(source, "close"):
         source.close()

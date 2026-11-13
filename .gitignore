@@ -33,3 +33,12 @@ code/sync/res/
 *.json
 code/sync/data/
 *.docx
+# -- model checkpoints & derived caches (heavy, reproducible) --
+*.pt
+*.pkl
+# google drive conflict copies
+* 2.*
+# -- exceptions: lightweight assets & critical tiny configs --
+!code/sync/docs/**
+!code/sync/src/fusion/late_fusion/split.json
+!code/sync/src/fusion/late_fusion/pack_day_convention.json

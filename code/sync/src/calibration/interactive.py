@@ -76,6 +76,16 @@ def bev_view_limits(pts, max_range: float, *, min_span: float = 4.0, pad: float 
     return lat_lim, fwd_lim
 
 
+def _safe_record(callback: Optional[Callable[[], None]]) -> None:
+    """Fire the labeled-frame snapshot callback; never let it break the GUI."""
+    if callback is None:
+        return
+    try:
+        callback()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  WARNING: labeled-frame capture failed ({exc})")
+
+
 class DualPanelPicker:
     def __init__(
         self,
@@ -89,6 +99,9 @@ class DualPanelPicker:
         current_pair_idx: Callable[[], Optional[int]],
         advance_frame: Optional[Callable[[], bool]] = None,
         on_solve: Optional[Callable[[], None]] = None,
+        on_record: Optional[Callable[[], None]] = None,
+        on_zoom: Optional[Callable[[], None]] = None,
+        on_color: Optional[Callable[[], None]] = None,
     ):
         self.fig = fig
         self.ax_source = ax_source
@@ -99,6 +112,9 @@ class DualPanelPicker:
         self.current_pair_idx = current_pair_idx
         self.advance_frame = advance_frame
         self.on_solve = on_solve
+        self.on_record = on_record
+        self.on_zoom = on_zoom
+        self.on_color = on_color
 
         self._pending_source: Optional[np.ndarray] = None
         self._artists: List = []
@@ -134,6 +150,7 @@ class DualPanelPicker:
             self._pending_source = None
             self.fig.canvas.draw_idle()
             self._refresh_status()
+            _safe_record(self.on_record)
 
     def _on_key(self, event) -> None:
         key = (event.key or "").lower()
@@ -146,6 +163,10 @@ class DualPanelPicker:
             self._refresh_status()
         elif key == "s" and self.on_solve is not None:
             self.on_solve()
+        elif key == "z" and self.on_zoom is not None:
+            self.on_zoom()
+        elif key == "c" and self.on_color is not None:
+            self.on_color()
         elif key in ("q", "escape"):
             import matplotlib.pyplot as plt
 
@@ -165,6 +186,7 @@ class DualPanelPicker:
                     self._artists.pop().remove()
         self.fig.canvas.draw_idle()
         self._refresh_status()
+        _safe_record(self.on_record)
 
     def _clear_artists(self) -> None:
         for a in self._artists:
@@ -212,6 +234,9 @@ class BoxPairPicker:
         current_pair_idx: Callable[[], Optional[int]],
         advance_frame: Optional[Callable[[], bool]] = None,
         on_solve: Optional[Callable[[], None]] = None,
+        on_record: Optional[Callable[[], None]] = None,
+        on_zoom: Optional[Callable[[], None]] = None,
+        on_color: Optional[Callable[[], None]] = None,
     ):
         self.fig = fig
         self.ax_source = ax_source
@@ -222,6 +247,9 @@ class BoxPairPicker:
         self.current_pair_idx = current_pair_idx
         self.advance_frame = advance_frame
         self.on_solve = on_solve
+        self.on_record = on_record
+        self.on_zoom = on_zoom
+        self.on_color = on_color
 
         self._stage = 0  # 0=src corner1, 1=src corner2, 2=tgt corner1, 3=tgt corner2
         self._c1: Optional[Tuple[float, float]] = None
@@ -270,6 +298,7 @@ class BoxPairPicker:
             self._refresh_status()
             return
         # second corner -> form box
+        recorded = False
         x0, x1 = sorted((self._c1[0], float(event.xdata)))
         y0, y1 = sorted((self._c1[1], float(event.ydata)))
         self._clear_preview()
@@ -294,8 +323,11 @@ class BoxPairPicker:
             self.corr_set.add(self._pending_source, pt, pair_idx=self.current_pair_idx())
             self._artists.append(self._rect(ax, x0, x1, y0, y1))
             self._pending_source, self._stage, self._c1 = None, 0, None
+            recorded = True
         self.fig.canvas.draw_idle()
         self._refresh_status()
+        if recorded:
+            _safe_record(self.on_record)
 
     def _on_key(self, event):
         key = (event.key or "").lower()
@@ -307,6 +339,10 @@ class BoxPairPicker:
             self._refresh_status()
         elif key == "s" and self.on_solve is not None:
             self.on_solve()
+        elif key == "z" and self.on_zoom is not None:
+            self.on_zoom()
+        elif key == "c" and self.on_color is not None:
+            self.on_color()
         elif key in ("q", "escape"):
             import matplotlib.pyplot as plt
 
@@ -331,6 +367,7 @@ class BoxPairPicker:
                     self._artists.pop().remove()
         self.fig.canvas.draw_idle()
         self._refresh_status()
+        _safe_record(self.on_record)
 
     def _flash(self, msg: str):
         self._status.set_text(msg)

@@ -316,8 +316,11 @@ def apply_dataset_config(
     for key in DATASET_FIELDS:
         if key not in entry or entry[key] is None:
             continue
-        flag = flag_map.get(key)
-        if flag and _cli_flag_was_set(flag):
+        # Every dataset field has a matching --<dest> flag; honor it when set on the CLI
+        # so an explicit path always wins over the dataset default (the flag_map entries
+        # are just the ones whose flag spelling matches, kept for clarity).
+        flag = flag_map.get(key, "--" + key)
+        if _cli_flag_was_set(flag):
             continue
         if not hasattr(args, key):
             continue

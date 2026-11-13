@@ -1,0 +1,20 @@
+{
+ "az_sign": -1,
+ "r_flip": false,
+ "corr": {
+  "az+1_rflipFalse": 0.676,
+  "az+1_rflipTrue": -0.135,
+  "az-1_rflipFalse": 0.823,
+  "az-1_rflipTrue": -0.14
+ },
+ "2026.05.11": {
+  "az_sign": -1,
+  "r_flip": false,
+  "corr": {
+   "az+1_rflipFalse": 0.674,
+   "az+1_rflipTrue": -0.072,
+   "az-1_rflipFalse": 0.815,
+   "az-1_rflipTrue": -0.03
+  }
+ }
+}

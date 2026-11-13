@@ -165,23 +165,28 @@ def compute_range_resolution(adc_sample_rate, num_adc_samples, chirp_slope):
 
 def compute_doppler_resolution(num_chirps, bandwidth, chirp_interval, num_tx):
     """
-        Compute Doppler Resolution in meters/second
+        Compute Doppler (radial-velocity) Resolution in meters/second
         Inputs:
-            num_chirps
-            bandwidth - bandwidth of each chirp (MHz)
-            chirp_interval - total interval of a chirp including idle time (usec)
-            num_tx
+            num_chirps - TOTAL chirps per frame (already includes all TX)
+            bandwidth  - swept bandwidth in Hz (chirp_slope * ramp_end_time)
+            chirp_interval - time between chirps in SECONDS (ramp_end + idle)
+            num_tx     - accepted for API compatibility; NOT used. It is already
+                         folded into num_chirps -- the coherent processing interval
+                         CPI = num_chirps * chirp_interval, so num_tx cancels.
         Outputs:
-            doppler_resolution (ms)
+            doppler_resolution (m/s)
     """
-    # compute center frequency in GHz
-    center_freq = (77 + (bandwidth*1e-3)/2) # GHz
+    # center frequency (Hz): 77 GHz start + half the swept bandwidth.
+    # NOTE: bandwidth is passed in Hz (e.g. chirp_slope[MHz/us]*ramp_end[us]*1e6).
+    center_freq = 77e9 + bandwidth / 2.0  # Hz
 
-    # compute center wavelength 
-    lmbda = LIGHT_SPEED/(center_freq * 1e9) # meters
+    # center wavelength
+    lmbda = LIGHT_SPEED / center_freq  # meters
 
-    # compute doppler resolution in meters/second
-    doppler_resolution = lmbda / (2 * num_chirps * num_tx * chirp_interval)
+    # v_res = lambda / (2 * CPI); CPI = total chirps * chirp_interval.
+    # (num_tx is NOT multiplied here: with TDM the per-TX Doppler-sample spacing is
+    #  num_tx*chirp_interval over num_chirps/num_tx samples -> num_tx cancels.)
+    doppler_resolution = lmbda / (2.0 * num_chirps * chirp_interval)
 
     return doppler_resolution
 

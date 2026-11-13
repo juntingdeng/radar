@@ -46,6 +46,7 @@ from lib.bev_render import (  # noqa: E402
     canonical_scene_bounds,
     clamp_display_bounds,
     compute_range_azimuth,
+    radar_processing_kwargs_from_args,
     crop_topdown_panel,
     infer_sync_packets_per_frame,
     lidar_panel_axis,
@@ -247,6 +248,8 @@ class RadarLoader:
             args, args.radar_h5, fallback=max(1, _adc_ppf // 6)
         )
         self.radar_processing = str(getattr(args, "radar_processing", "legacy"))
+        # Doppler/AOA overrides (doppler_mode, doppler_min_bins, aoa_method).
+        self.radar_proc_kw = radar_processing_kwargs_from_args(args)
         self.use_radar_bev = use_radar_bev_panel(args)
         self.canonical_lateral_range, self.canonical_forward_range = canonical_scene_bounds()
         self.lateral_range, self.forward_range = clamp_display_bounds(
@@ -297,6 +300,7 @@ class RadarLoader:
                 self.radar,
                 angle="Azimuth",
                 processing=self.radar_processing,
+                **self.radar_proc_kw,
             )
             if cache is not None:
                 cache.put_radar(adc_frame_idx, range_az)
@@ -349,6 +353,7 @@ class SyncVideoRenderer:
         self.max_adc_frame = radar.max_adc_frame
         self.packet_ts = radar.packet_ts
         self.radar_processing = radar.radar_processing
+        self.radar_proc_kw = radar.radar_proc_kw
         self.use_radar_bev = radar.use_radar_bev
         self.canonical_lateral_range = radar.canonical_lateral_range
         self.canonical_forward_range = radar.canonical_forward_range
@@ -612,6 +617,7 @@ class SyncVideoRenderer:
                     self.radar,
                     angle="Azimuth",
                     processing=self.radar_processing,
+                    **self.radar_proc_kw,
                 )
                 self.frame_cache.put_radar(adc, range_az)
 
@@ -779,6 +785,32 @@ def build_argparser() -> argparse.ArgumentParser:
         default="legacy",
         help="Radar range-azimuth chain: legacy (raw FFT+Capon) or ti "
         "(clutter removal + Hamming windows + zero-Doppler notch).",
+    )
+    p.add_argument(
+        "--radar_doppler_mode",
+        choices=["all", "moving", "static"],
+        default="all",
+        help="Which Doppler bins are integrated into the top-down radar map (the "
+        "display stays forward/lateral either way): all (default), moving (drop the "
+        "near-zero-velocity bins so walking people / vehicles dominate instead of "
+        "static clutter), or static (keep only those bins: walls, poles, parked cars).",
+    )
+    p.add_argument(
+        "--radar_doppler_min_bins",
+        type=int,
+        default=2,
+        help="Half-width in Doppler bins of the 'static' band used by "
+        "--radar_doppler_mode (larger = more of the near-zero-velocity map treated "
+        "as static).",
+    )
+    p.add_argument(
+        "--radar_aoa",
+        choices=["capon", "dbf_nci", "dbf_coh"],
+        default=None,
+        help="Angle-of-arrival estimator (default: whatever --radar_processing picks, "
+        "capon). dbf_nci sums power non-coherently over the retained Doppler bins — "
+        "the right choice with --radar_doppler_mode moving, since few Doppler "
+        "snapshots make the Capon covariance rank-deficient.",
     )
     p.add_argument(
         "--lidar_view",

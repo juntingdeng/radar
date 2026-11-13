@@ -88,7 +88,8 @@ num_chirps = adc_data.shape[0]
 chirp_interval = (ramp_end_time + idle_time) * 1e-6 # usec
 
 doppler_resolution = compute_doppler_resolution(num_chirps, bandwidth, chirp_interval, num_tx)
-max_doppler = doppler_resolution * num_chirps / 2
+# v_max = doppler_res * (num Doppler bins)/2; TDM MIMO Doppler-FFT length is num_chirps//num_tx.
+max_doppler = doppler_resolution * (num_chirps // num_tx) / 2
 
 print(f'doppler_resolution: {doppler_resolution}, doppler_resolution: {max_doppler}')
 

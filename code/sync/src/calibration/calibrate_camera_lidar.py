@@ -5,14 +5,28 @@ Workflow
 1. Pick a few sync pairs that contain sharp, static structure visible to BOTH
    the D435 depth camera and the lidar (wall corners, pole bases, curbs).
 2. For each pair the tool shows the colorized depth image (left) and the lidar
-   BEV (right). Click the SAME physical point in each: left first, then right.
+   (right). Click the SAME physical point in each: left first, then right.
    - Left click  -> depth at that pixel is back-projected to a 3D camera point.
    - Right click -> snapped to the nearest real lidar return (full 3D XYZ).
 3. Press ``s`` to solve. It runs a rigid Umeyama fit (target = R*source + t),
    prints the RMS residual, writes ``camera_to_lidar`` into the calibration JSON
    and saves the raw correspondences alongside.
 
+Every pick also snapshots the annotated figure to
+``<calibration dir>/calibration_labels/camera_lidar/`` (one PNG per pair, boxes/marks
+included) and those frames are stitched into a video on exit (``--no_label_frames``
+to skip, ``--label_dir`` / ``--label_fps`` to control).
+
 Collect >= 4 correspondences spread in depth and lateral extent for a stable fit.
+
+By DEFAULT the solve locks roll (rotation about the lidar forward axis) to 0, which
+is correct when both sensors are physically level. This matters because the D435's
+~6 m depth limit makes near+high features scarce, so a free 3-DoF fit can't pin roll
+and invents a spurious ~10-15 deg tilt -- visible only in validate_calibration (where
+the extrinsic is applied), never in the raw panels. If the sensors are genuinely NOT
+level, pass ``--free_solve`` to recover all three rotation DoF; then also spread picks
+in *height* and use ``--lidar_range_view`` (a front range image, rows=elevation) so
+you can deliberately pick features at different heights and constrain the roll.
 
 Run::
 
@@ -23,7 +37,7 @@ Run::
 Headless solve from an existing correspondence file (no GUI)::
 
     python code/sync/calibration/calibrate_camera_lidar.py \
-        -d 2026.05.10/18-05-08 --solve_only path/to/camera_lidar_correspondences.json
+        -d 2026.05.10/18-05-08 --solve_only path/to/correspondences/camera_lidar.json
 """
 
 from __future__ import annotations
@@ -53,12 +67,31 @@ from lib.dataset_config import add_dataset_arguments, apply_dataset_config  # no
 from camera_projection.geometry import load_calibration  # noqa: E402
 
 from correspondences import CorrespondenceSet  # noqa: E402
+from frame_capture import (  # noqa: E402
+    LabeledFrameRecorder,
+    add_label_arguments,
+)
 from extrinsic_io import (  # noqa: E402
     ensure_calibration_json,
     reuse_calibration,
     write_extrinsic,
 )
-from rigid_solve import fit_with_rejection, umeyama_3d  # noqa: E402
+from rigid_solve import (  # noqa: E402
+    IDEAL_CAM_TO_LIDAR,
+    fit_with_rejection,
+    level_constrained_fit,
+    umeyama_3d,
+)
+
+
+def _roll_pitch_yaw_vs_ideal(rot: np.ndarray):
+    """Residual roll/pitch/yaw (deg) of a cam->lidar rotation vs the ideal, about
+    the lidar axes (X=fwd/roll, Y=lat/pitch, Z=up/yaw)."""
+    rr = rot @ IDEAL_CAM_TO_LIDAR.T
+    roll = np.degrees(np.arctan2(rr[2, 1], rr[2, 2]))
+    pitch = np.degrees(np.arctan2(-rr[2, 0], np.hypot(rr[0, 0], rr[1, 0])))
+    yaw = np.degrees(np.arctan2(rr[1, 0], rr[0, 0]))
+    return roll, pitch, yaw
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -154,6 +187,16 @@ def build_argparser() -> argparse.ArgumentParser:
         "refit — safety net for a few gross mis-picks (won't fix inconsistent data).",
     )
     p.add_argument(
+        "--free_solve",
+        action="store_true",
+        help="Solve all three rotation DOF (full Umeyama) instead of the DEFAULT "
+        "roll-locked 'level' solve. Use only if the camera and lidar are NOT both "
+        "physically level. By default roll (rotation about the lidar forward axis) is "
+        "locked to 0, because the D435's ~6 m depth limit makes near+high features scarce, "
+        "so a free fit under-constrains roll and invents a spurious ~10-15 deg tilt "
+        "(visible only in validate_calibration, not in the raw panels).",
+    )
+    p.add_argument(
         "--snap_radius_m",
         type=float,
         default=1.0,
@@ -162,8 +205,30 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max_range_m",
         type=float,
-        default=30.0,
-        help="Upper bound for the lidar BEV view (m). Auto-fit stays within this.",
+        default=15.0,
+        help="Upper bound for the lidar BEV view (m); also crops far points from the "
+        "display. Default 15 zooms into the near region where picks happen (<6 m depth), "
+        "matching the label viewer's clarity. Raise for more scene context.",
+    )
+    p.add_argument(
+        "--zoom_tight_range_m",
+        type=float,
+        default=8.0,
+        help="BEV window (m) used by the 'z' tight-zoom toggle: zooms onto the dense near "
+        "returns so scan rings read as crisply as the label viewer. Press 'z' to toggle "
+        "wide<->tight per frame; wide is the default (needed to pick far features).",
+    )
+    p.add_argument(
+        "--color_z_min",
+        type=float,
+        default=-0.5,
+        help="Lower height (m) for the 'c' height-color scale (blue). Around ground level.",
+    )
+    p.add_argument(
+        "--color_z_max",
+        type=float,
+        default=2.0,
+        help="Upper height (m) for the 'c' height-color scale (red). Around vehicle/person top.",
     )
     p.add_argument(
         "--no_auto_range",
@@ -176,13 +241,29 @@ def build_argparser() -> argparse.ArgumentParser:
         help="Don't mirror the lidar BEV horizontally. By default it is flipped so its "
         "left/right matches the forward camera (display only; picks are unaffected).",
     )
+    p.add_argument(
+        "--lidar_range_view",
+        action="store_true",
+        help="Show the lidar as a front RANGE IMAGE (rows=elevation, cols=azimuth) "
+        "instead of a top-down BEV. The BEV collapses height, so roll/pitch are "
+        "under-constrained; the range image lets you pick points at DIFFERENT heights "
+        "(a pole's top vs its base) which is what pins the roll. Recommended with --box.",
+    )
+    p.add_argument(
+        "--range_fov_deg",
+        type=float,
+        default=80.0,
+        help="Horizontal FOV (deg) of the lidar range-image crop (--lidar_range_view). "
+        "Match it roughly to the camera so the two panels show the same scene.",
+    )
+    add_label_arguments(p)
     add_dataset_arguments(p)
     return p
 
 
 
 
-def _solve_and_write(cs: CorrespondenceSet, args, corr_path: Path) -> int:
+def _solve_and_write(cs: CorrespondenceSet, args, corr_path: Path, *, write: bool = True) -> int:
     src, tgt = cs.as_arrays()
     if len(cs) < 3:
         print(f"Need >= 3 correspondences to solve; have {len(cs)}. Nothing written.")
@@ -199,20 +280,41 @@ def _solve_and_write(cs: CorrespondenceSet, args, corr_path: Path) -> int:
             print(f"    #{i} pair={cs.points[i].pair_idx} cam_z={src[i,2]:.1f} m "
                   f"lidar_X={tgt[i,0]:.1f} m  -> different objects; re-box a NEAR one.")
 
+    solve_fn = umeyama_3d if args.free_solve else level_constrained_fit
     if args.reject_outliers_m > 0:
         fit, keep = fit_with_rejection(
-            umeyama_3d, src, tgt, max_residual=args.reject_outliers_m, min_points=4
+            solve_fn, src, tgt, max_residual=args.reject_outliers_m, min_points=4
         )
         dropped = [int(i) for i in np.where(~keep)[0]]
         if dropped:
             print(f"Robust fit dropped {len(dropped)} correspondence(s) "
                   f"> {args.reject_outliers_m} m: {dropped}")
     else:
-        fit = umeyama_3d(src, tgt)
-    print("\n=== camera->lidar rigid fit ===")
+        fit = solve_fn(src, tgt)
+    mode = "free 3D" if args.free_solve else "roll-LOCKED (level, default)"
+    print(f"\n=== camera->lidar rigid fit ({mode}) ===")
     print(fit.summary())
+    roll, pitch, yaw = _roll_pitch_yaw_vs_ideal(fit.transform[:3, :3])
+    print(f"Rotation vs ideal cam-optical->lidar:  roll={roll:+.1f}  pitch={pitch:+.1f}  "
+          f"yaw={yaw:+.1f} deg  (roll should be ~0 for level sensors)")
+    if args.free_solve and abs(roll) > 4.0:
+        print(f"  WARNING: {roll:+.1f} deg roll is large for level sensors and usually "
+              "means roll is under-constrained (too few near+high picks). Drop --free_solve "
+              "to lock roll (the default), or add near high features via --lidar_range_view.")
     print("Transform (camera_optical -> lidar_sensor):")
     print(np.array2string(fit.transform, precision=5, suppress_small=True))
+    t = fit.transform[:3, 3]
+    t_norm = float(np.linalg.norm(t))
+    print(f"Baseline |t|={t_norm * 100:.1f} cm  "
+          f"(t=[{t[0]:+.2f} {t[1]:+.2f} {t[2]:+.2f}] m)  "
+          "-- physical camera<->lidar offset should be ~20-60 cm.")
+    if t_norm > 0.8:
+        print(
+            f"  WARNING: |t|={t_norm * 100:.0f} cm is physically implausible for a rigid rig "
+            "(camera & lidar are ~20-60 cm apart). The solve is trading rotation error for a "
+            "fake translation -- the calibration is WRONG even if RMS looks small. Re-pick with "
+            "correctly-associated features at reliable depth (<4.5 m), spread in bearing/height."
+        )
     worst = int(np.argmax(fit.residuals))
     print(f"Worst kept correspondence: err={fit.residuals[worst] * 1e3:.1f} mm")
     if fit.rms > 0.15:
@@ -221,6 +323,10 @@ def _solve_and_write(cs: CorrespondenceSet, args, corr_path: Path) -> int:
             "spread across depth/lateral extent."
         )
     cs.save(corr_path)
+    if not write:
+        print("\n(Not written to calibration.json — press 's' during picking to save this "
+              "fit, or re-run to finalize. Correspondences were saved.)")
+        return 0
     write_extrinsic(
         args.calibration_json,
         key="camera_to_lidar",
@@ -282,7 +388,7 @@ def main() -> int:
 
     corr_path = Path(
         args.correspondences
-        or (Path(args.calibration_json).parent / "camera_lidar_correspondences.json")
+        or (Path(args.calibration_json).parent / "correspondences" / "camera_lidar.json")
     )
 
     cs = CorrespondenceSet(
@@ -368,12 +474,18 @@ def main() -> int:
             continue
         print(f"  reading lidar scan {l_idx} for pair {pid} ...", flush=True)
         pts = lidar.points_from_scan_idx(l_idx)
+        rng = (
+            lidar.range_image_from_scan_idx(l_idx, front_fov_deg=args.range_fov_deg)
+            if args.lidar_range_view
+            else None
+        )
         frames.append(
             {
                 "pair_idx": pid,
                 "depth": depth_img,
                 "color": color_map.get(c_idx),
                 "lidar_xyz": pts,
+                "lidar_range": rng,
             }
         )
 
@@ -382,7 +494,18 @@ def main() -> int:
         return 2
     print(f"Loaded {len(frames)} pair(s). Opening interactive window...", flush=True)
 
-    state = {"i": 0}
+    # Labeled frames: every pick re-snapshots the annotated figure for the current
+    # pair, so each PNG ends up holding all marks made on that pair; they are
+    # stitched into a video once picking ends.
+    label_dir = Path(
+        args.label_dir
+        or (Path(args.calibration_json).parent / "calibration_labels" / "camera_lidar")
+    )
+    recorder = LabeledFrameRecorder(label_dir, enabled=not args.no_label_frames)
+    if recorder.enabled:
+        print(f"Labeled frames -> {label_dir}", flush=True)
+
+    state = {"i": 0, "zoom_tight": False, "height_color": False}
 
     def current_pair_idx() -> Optional[int]:
         return frames[state["i"]]["pair_idx"]
@@ -443,6 +566,46 @@ def main() -> int:
         xc = (uc - calib.cx) / calib.fx * zc
         yc = (vc - calib.cy) / calib.fy * zc
         return np.array([np.median(xc), np.median(yc), np.median(zc)], dtype=np.float64)
+
+    def lidar_snap_range(col: float, row: float) -> Optional[np.ndarray]:
+        # Range-image pick: (col, row) pixel -> nearest VALID organized point.
+        d = frames[state["i"]]["lidar_range"]
+        if d is None:
+            return None
+        xyz, valid = d["xyz"], d["valid"]
+        h, w = valid.shape
+        ci, ri = int(round(col)), int(round(row))
+        rad = int(args.pick_search_px)
+        r0, r1 = max(0, ri - rad), min(h, ri + rad + 1)
+        c0, c1 = max(0, ci - rad), min(w, ci + rad + 1)
+        sub = valid[r0:r1, c0:c1]
+        if not sub.any():
+            return None
+        rs, cs = np.mgrid[r0:r1, c0:c1]
+        d2 = np.where(sub, (cs - ci) ** 2 + (rs - ri) ** 2, np.iinfo(np.int64).max)
+        k = int(np.argmin(d2))
+        return xyz[int(rs.flat[k]), int(cs.flat[k])].astype(np.float64)
+
+    def lidar_box_range(x0: float, x1: float, y0: float, y1: float) -> Optional[np.ndarray]:
+        # Box in range-image (col, row) pixels -> centroid of enclosed points.
+        d = frames[state["i"]]["lidar_range"]
+        if d is None:
+            return None
+        xyz, valid = d["xyz"], d["valid"]
+        h, w = valid.shape
+        c0, c1 = max(0, int(np.floor(x0))), min(w, int(np.ceil(x1)) + 1)
+        r0, r1 = max(0, int(np.floor(y0))), min(h, int(np.ceil(y1)) + 1)
+        if c1 <= c0 or r1 <= r0:
+            return None
+        sub = valid[r0:r1, c0:c1]
+        if int(sub.sum()) < args.min_box_points:
+            return None
+        q = xyz[r0:r1, c0:c1][sub]
+        # Foreground bias by range: gaps in a box can see far background through it.
+        rr = np.hypot(q[:, 0], q[:, 1])
+        thr = np.percentile(rr, args.box_depth_pct)
+        q = q[rr <= thr]
+        return np.array([np.median(q[:, 0]), np.median(q[:, 1]), np.median(q[:, 2])], dtype=np.float64)
 
     def lidar_box(x0: float, x1: float, y0: float, y1: float) -> Optional[np.ndarray]:
         # x=lateral (Y=pts[:,1]), y=forward (X=pts[:,0]).
@@ -507,10 +670,44 @@ def main() -> int:
         ax_d.format_coord = _depth_fmt
 
         ax_l.clear()
+        if args.lidar_range_view:
+            d = f["lidar_range"]
+            rm = np.where(d["valid"], d["range_m"], np.nan)
+            ax_l.imshow(rm, cmap="turbo", aspect="auto", interpolation="nearest")
+            ax_l.set_title(
+                f"LIDAR range image pair {f['pair_idx']} — rows=HEIGHT, cols=azimuth.  "
+                "Pick HIGH & LOW features (pins roll)"
+            )
+            ax_l.set_xlabel("azimuth (L->R matches camera)")
+            ax_l.set_ylabel("elevation (up = high)")
+            xyz_img, valid_img = d["xyz"], d["valid"]
+
+            def _range_fmt(x, y, _x=xyz_img, _v=valid_img):
+                ci, ri = int(round(x)), int(round(y))
+                if 0 <= ri < _v.shape[0] and 0 <= ci < _v.shape[1] and _v[ri, ci]:
+                    p = _x[ri, ci]
+                    return f"fwd={p[0]:.1f} lat={p[1]:.1f} up={p[2]:.1f} m"
+                return f"px=({ci},{ri})"
+
+            ax_l.format_coord = _range_fmt
+            fig.canvas.draw_idle()
+            return
         pts = f["lidar_xyz"]
         if pts.size:
-            ax_l.scatter(pts[:, 1], pts[:, 0], s=4, c=pts[:, 2], cmap="viridis")
-        if args.no_auto_range:
+            # Default: uniform gray, small points, range-cropped (clean for corner-picking).
+            # 'c' toggle: color by height Z (turbo) so ground arcs (low=blue) separate from
+            # objects standing up (high=warm) -- the fastest way to tell "arc vs object".
+            m = np.linalg.norm(pts[:, :2], axis=1) <= args.max_range_m
+            if state.get("height_color"):
+                ax_l.scatter(pts[m, 1], pts[m, 0], s=2, c=pts[m, 2],
+                             cmap="turbo", vmin=args.color_z_min, vmax=args.color_z_max)
+            else:
+                ax_l.scatter(pts[m, 1], pts[m, 0], s=2, c="0.6")
+        if state.get("zoom_tight"):
+            # 'z' toggle: zoom tight onto the dense near returns so the scan rings read
+            # as crisply as the label viewer (viz_labels). Same data, just a smaller window.
+            lat_lim, fwd_lim = bev_view_limits(pts, args.zoom_tight_range_m)
+        elif args.no_auto_range:
             lat_lim, fwd_lim = (-args.max_range_m, args.max_range_m), (0.0, args.max_range_m)
         else:
             lat_lim, fwd_lim = bev_view_limits(pts, args.max_range_m)
@@ -524,7 +721,9 @@ def main() -> int:
         ax_l.set_xlabel("Lateral Y (m)  [L/R matches camera]")
         ax_l.set_ylabel("Forward X (m)")
         span = f"{lat_lim[1] - lat_lim[0]:.0f}x{fwd_lim[1] - fwd_lim[0]:.0f} m"
-        ax_l.set_title(f"LIDAR BEV ({span})  —  CLICK same point (2nd)")
+        zmode = "TIGHT" if state.get("zoom_tight") else "wide"
+        cmode = "  c=HEIGHT(blue=grnd,red=high)" if state.get("height_color") else "  c=color"
+        ax_l.set_title(f"LIDAR BEV ({span}, {zmode}; z=zoom{cmode})  —  CLICK same point (2nd)")
         ax_l.set_aspect("equal")
         ax_l.grid(True, alpha=0.3)
         fig.canvas.draw_idle()
@@ -545,49 +744,90 @@ def main() -> int:
     def on_solve() -> None:
         _solve_and_write(cs, args, corr_path)
 
+    def on_zoom() -> None:
+        # Non-destructive per-frame BEV zoom toggle (wide-pick <-> tight/viz-like).
+        state["zoom_tight"] = not state["zoom_tight"]
+        draw_frame()
+        p = _picker["p"]
+        if p is not None and hasattr(p, "reset_selectors"):
+            p.reset_selectors()  # RectangleSelectors are removed by ax.clear()
+
+    def on_color() -> None:
+        # Non-destructive per-frame BEV color toggle (gray <-> height-Z turbo).
+        state["height_color"] = not state["height_color"]
+        draw_frame()
+        p = _picker["p"]
+        if p is not None and hasattr(p, "reset_selectors"):
+            p.reset_selectors()
+
+    def record_frame() -> None:
+        recorder.capture(fig, current_pair_idx())
+
     draw_frame()
 
     # Keep a strong reference: matplotlib holds event callbacks weakly, so an
     # unreferenced picker gets garbage-collected and clicks silently stop working.
+    target_box = lidar_box_range if args.lidar_range_view else lidar_box
+    target_pt = lidar_snap_range if args.lidar_range_view else lidar_snap
+    lidar_name = "LIDAR range image" if args.lidar_range_view else "LIDAR"
     if args.box:
         from interactive import BoxPairPicker
 
         picker = BoxPairPicker(
             fig, ax_d, ax_l,
             extract_source_box=depth_box,
-            extract_target_box=lidar_box,
+            extract_target_box=target_box,
             corr_set=cs,
             current_pair_idx=current_pair_idx,
             advance_frame=advance,
             on_solve=on_solve,
+            on_record=record_frame,
+            on_zoom=on_zoom,
+            on_color=on_color,
         )
-        mode_msg = "  DRAG a box around an object in the DEPTH panel, then the same object in LIDAR."
+        mode_msg = f"  DRAG a box around an object in the DEPTH panel, then the same object in {lidar_name}."
     else:
         from interactive import DualPanelPicker
 
         picker = DualPanelPicker(
             fig, ax_d, ax_l,
             extract_source=depth_backproject,
-            extract_target=lidar_snap,
+            extract_target=target_pt,
             corr_set=cs,
             current_pair_idx=current_pair_idx,
             advance_frame=advance,
             on_solve=on_solve,
+            on_record=record_frame,
+            on_zoom=on_zoom,
+            on_color=on_color,
         )
-        mode_msg = "  Click a point in the DEPTH panel, then the same point in the LIDAR panel."
+        mode_msg = f"  Click a point in the DEPTH panel, then the same point in the {lidar_name} panel."
     _picker["p"] = picker
     fig._calib_picker = picker  # extra safety: lives as long as the figure
     print(
         "Interactive calibration ready.\n"
         f"{mode_msg}\n"
-        "  u=undo  n=next pair  s=solve+save  q=quit"
+        "  u=undo  n=next pair  s=solve+save  z=zoom(wide/tight)  "
+        "c=color(gray/height)  q=quit"
     )
     plt.show()
 
-    # Save whatever was picked even if the user quit without pressing 's'.
+    # On quit, solve+print the final correspondence set even if the user never pressed 's' --
+    # so the RMS/transform always show at the end (the interactive 's' only prints when pressed).
+    # PRINT-ONLY (write=False): quitting does NOT overwrite calibration.json, so an abandoned
+    # bad-pick session can't silently clobber a good calib -- press 's' to actually save.
+    # Falls back to just saving the correspondences when there are too few to solve.
     if cs.points:
-        cs.save(corr_path)
-        print(f"Saved {len(cs)} correspondences to {corr_path}")
+        if len(cs) >= 3:
+            print("\nSolving final correspondence set on exit "
+                  "(press 's' while picking to solve+SAVE interactively)...")
+            _solve_and_write(cs, args, corr_path, write=False)  # prints RMS+transform, saves corr, no write
+        else:
+            cs.save(corr_path)
+            print(f"Saved {len(cs)} correspondence(s) to {corr_path} (need >= 3 to solve).")
+    if len(recorder):
+        print(f"Saved {len(recorder)} labeled frame(s) in {label_dir}")
+        recorder.write_video(args.label_video, fps=args.label_fps)
     return 0
 
 

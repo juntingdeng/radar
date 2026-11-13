@@ -80,12 +80,21 @@ class radarConfig:
         self.packets_per_frame = (2*self.samples_per_frame)//(728*2)
 
         self.bandwidth = self.chirp_slope*self.ramp_end_time*1e6
-        self.range_resolution = LIGHT_SPEED/(2*self.bandwidth)
+        # Range resolution / max range depend on the bandwidth swept *while the ADC is
+        # sampling* (num_adc_samples/adc_sample_rate microseconds), NOT the full ramp.
+        # The ADC samples ~102.4 us of the 120 us ramp here, so using ramp_end_time made
+        # the effective B too large (3.60 vs 3.07 GHz) => every range read ~15% too short
+        # (0.0417 vs 0.0489 m/bin). Doppler below still uses the full-ramp self.bandwidth.
+        self.range_bandwidth = self.chirp_slope*(self.num_adc_samples/self.adc_sample_rate)*1e6
+        self.range_resolution = LIGHT_SPEED/(2*self.range_bandwidth)
         self.max_range = self.range_resolution * self.num_adc_samples
 
         self.chirp_interval = (self.ramp_end_time + self.idle_time) * 1e-6 # usec
         self.doppler_resolution = compute_doppler_resolution(self.num_chirps, self.bandwidth, self.chirp_interval, self.num_tx)
-        self.max_doppler = self.doppler_resolution * self.num_chirps / 2
+        # Max unambiguous radial velocity = doppler_res * (num Doppler bins)/2.
+        # With TDM MIMO the Doppler-FFT length is num_chirps/num_tx (not the total), so
+        # v_max is bounded by the per-TX sampling -> use num_chirps//num_tx here.
+        self.max_doppler = self.doppler_resolution * (self.num_chirps // self.num_tx) / 2
 
         self.ranges_real = np.arange(0, self.max_range/2 + self.range_resolution, self.range_resolution)
         range_ticks_real = np.arange(0, len(self.ranges_real), len(self.ranges_real)//10)

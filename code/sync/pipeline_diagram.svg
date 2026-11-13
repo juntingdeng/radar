@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#555"/>
+    </marker>
+    <style>
+      .title  { font-size: 30px; font-weight: 700; fill: #1a1a1a; }
+      .stage  { font-size: 20px; font-weight: 700; }
+      .item   { font-size: 14px; fill: #222; }
+      .sub    { font-size: 12px; fill: #555; }
+      .sensor { font-size: 15px; font-weight: 600; fill: #1a3d5c; }
+      .edge   { stroke: #555; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <text x="30" y="42" class="title">Sensor Fusion Pipeline &#8212; Sync &#8594; Calib &#8594; Label</text>
+
+  <!-- ===== Sensors ===== -->
+  <g>
+    <rect x="30"  y="90"  width="170" height="60" rx="8" fill="#e8f0fe" stroke="#4285c8" stroke-width="2"/>
+    <text x="115" y="118" text-anchor="middle" class="sensor">Radar</text>
+    <text x="115" y="138" text-anchor="middle" class="sub">TI AWR2944</text>
+
+    <rect x="30"  y="250" width="170" height="60" rx="8" fill="#e8f0fe" stroke="#4285c8" stroke-width="2"/>
+    <text x="115" y="278" text-anchor="middle" class="sensor">Lidar</text>
+    <text x="115" y="298" text-anchor="middle" class="sub">Ouster OS-0-128</text>
+
+    <rect x="30"  y="410" width="170" height="60" rx="8" fill="#e8f0fe" stroke="#4285c8" stroke-width="2"/>
+    <text x="115" y="438" text-anchor="middle" class="sensor">Camera</text>
+    <text x="115" y="458" text-anchor="middle" class="sub">Intel D435</text>
+  </g>
+
+  <!-- sensor -> sync arrows -->
+  <path class="edge" d="M200 120 C 240 120, 240 260, 285 275"/>
+  <path class="edge" d="M200 280 H 285"/>
+  <path class="edge" d="M200 440 C 240 440, 240 300, 285 285"/>
+
+  <!-- ===== Stage 1: SYNC ===== -->
+  <rect x="290" y="200" width="200" height="160" rx="12" fill="#fff4e5" stroke="#e8912d" stroke-width="2.5"/>
+  <text x="390" y="232" text-anchor="middle" class="stage" fill="#b5670a">1. SYNC</text>
+  <line x1="310" y1="244" x2="470" y2="244" stroke="#e8912d" stroke-width="1"/>
+  <text x="308" y="272" class="item">Temporal alignment</text>
+  <text x="308" y="294" class="sub">match radar / lidar /</text>
+  <text x="308" y="310" class="sub">camera frames in time</text>
+  <text x="308" y="340" class="item" font-weight="700">&#8594; 14,979 sync pairs</text>
+
+  <path class="edge" d="M490 280 H 545"/>
+
+  <!-- ===== Stage 2: CALIB ===== -->
+  <rect x="550" y="180" width="230" height="200" rx="12" fill="#e6f4ea" stroke="#34a853" stroke-width="2.5"/>
+  <text x="665" y="212" text-anchor="middle" class="stage" fill="#1e7e34">2. CALIB</text>
+  <line x1="570" y1="224" x2="760" y2="224" stroke="#34a853" stroke-width="1"/>
+  <text x="568" y="250" class="item">Radar range fix</text>
+  <text x="568" y="266" class="sub">bandwidth bug, &#215;1.172</text>
+  <text x="568" y="296" class="item">Radar &#8596; lidar extrinsic</text>
+  <text x="568" y="312" class="sub">re-solve: fwd 1.98&#8594;~0.3 m</text>
+  <text x="568" y="342" class="item">Camera &#8596; lidar (ICP)</text>
+  <text x="568" y="358" class="sub">41 mm resid., t = 22.7 cm</text>
+
+  <path class="edge" d="M780 280 H 835"/>
+
+  <!-- ===== Stage 3: LABEL ===== -->
+  <rect x="840" y="180" width="240" height="200" rx="12" fill="#fce8e6" stroke="#d33b2c" stroke-width="2.5"/>
+  <text x="960" y="212" text-anchor="middle" class="stage" fill="#a52714">3. LABEL</text>
+  <line x1="860" y1="224" x2="1060" y2="224" stroke="#d33b2c" stroke-width="1"/>
+  <text x="858" y="250" class="item">YOLO &#8594; lidar frustum</text>
+  <text x="858" y="266" class="sub">oriented 3D boxes</text>
+  <text x="858" y="296" class="item">Lidar-raised boxes</text>
+  <text x="858" y="312" class="sub">out-of-FOV cars (~30%)</text>
+  <text x="858" y="342" class="item">Radar cross-check</text>
+  <text x="858" y="358" class="sub">per-box radar-confirmed</text>
+
+  <path class="edge" d="M960 380 V 430"/>
+
+  <!-- ===== Outputs ===== -->
+  <rect x="700" y="435" width="520" height="90" rx="12" fill="#f1f3f4" stroke="#9aa0a6" stroke-width="2"/>
+  <text x="960" y="463" text-anchor="middle" class="stage" fill="#3c4043" font-size="18">Outputs</text>
+  <text x="960" y="490" text-anchor="middle" class="item">annotations (yolo.json &#183; 34,775 boxes, 17,257 radar-confirmed)  &#8226;  K-Radar export  &#8226;  video</text>
+  <text x="960" y="510" text-anchor="middle" class="sub">all 14,979 pairs processed &#8594; 10,022 with objects &#8226; 10,488 lidar-raised (~30%)</text>
+</svg>

@@ -1,30 +1,49 @@
 {
-  "datasets": {
-    "2026.05.08": {
-      "description": "Mobile collection 2026-05-08 (copied locally to code/sync/data)",
-      "data_root": "/Users/juntingdeng/Library/CloudStorage/GoogleDrive-juntingd@andrew.cmu.edu/My Drive/CMU/Research/3DImage/sensor/TI/setup_test/code/sync/data/2026.05.08",
-      "captures": {
-        "17-34-27": {
-          "description": "Capture 17-34-27",
-
-          "radar_h5": "{data_root}/radar/2026.05.08-17.34.27.h5",
-          "lidar_pcap": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.pcap",
-          "lidar_metadata": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.json",
-          "camera_bag": "{data_root}/camera/20260508_173455.bag",
-          "camera_index": "res/2026.05.08/17-34-27/camera_index.npz",
-          "camera_sync_csv": "res/2026.05.08/17-34-27/camera_sync_pairs.csv",
-          "calibration_json": "res/2026.05.08/17-34-27/d435_calibration.json",
-          "annotations_path": "res/2026.05.08/17-34-27/annotations.json",
-
-          "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
-          "sync_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
-          "sync_summary": "res/2026.05.08/17-34-27/sync_summary.json",
-          "output_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
-          "output_json": "res/2026.05.08/17-34-27/sync_summary.json",
-          "out_video": "res/2026.05.08/17-34-27/sync_data.mp4",
-          "cache_dir": "res/2026.05.08/17-34-27/viz_cache"
-        }
-      }
+ "datasets": {
+  "2026.05.08": {
+   "description": "Mobile collection 2026-05-08 (copied locally to code/sync/data)",
+   "data_root": "/Users/juntingdeng/Library/CloudStorage/GoogleDrive-juntingd@andrew.cmu.edu/My Drive/CMU/Research/3DImage/sensor/TI/setup_test/code/sync/data/2026.05.08",
+   "captures": {
+    "17-34-27": {
+     "description": "Capture 17-34-27",
+     "radar_h5": "{data_root}/radar/2026.05.08-17.34.27.h5",
+     "lidar_pcap": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.pcap",
+     "lidar_metadata": "{data_root}/lidar/2026058_1734_47_OS-0-128_122519000479.json",
+     "camera_bag": "{data_root}/camera/20260508_173455.bag",
+     "camera_index": "res/2026.05.08/17-34-27/camera_index.npz",
+     "camera_sync_csv": "res/2026.05.08/17-34-27/camera_sync_pairs.csv",
+     "calibration_json": "res/2026.05.08/17-34-27/calibration.json",
+     "annotations_path": "res/2026.05.08/17-34-27/annotations/yolo.json",
+     "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
+     "sync_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
+     "sync_summary": "res/2026.05.08/17-34-27/sync_summary.json",
+     "output_csv": "res/2026.05.08/17-34-27/sync_pairs.csv",
+     "output_json": "res/2026.05.08/17-34-27/sync_summary.json",
+     "out_video": "res/2026.05.08/17-34-27/sync_data.mp4",
+     "cache_dir": "res/2026.05.08/17-34-27/viz_cache"
     }
+   }
+  },
+  "2026.10.24": {
+   "description": "Person walks through smoke, ANSYS plaza (capture-1 15.02.30)",
+   "data_root": "/Volumes/1.5T/2026.10.24",
+   "captures": {
+    "15.02.30": {
+     "description": "green-pants smoke window",
+     "radar_h5": "{data_root}/radar/2026.10.24-15.02.30.h5",
+     "lidar_pcap": "{data_root}/lidar/20261024_1503_28_OS-0-128_122519000479.pcap",
+     "lidar_metadata": "{data_root}/lidar/20261024_1503_28_OS-0-128_122519000479.json",
+     "camera_bag": "{data_root}/camera/20261024_150332.bag",
+     "camera_index": "res/2026.10.24/15.02.30/camera_index.npz",
+     "camera_sync_csv": "res/2026.10.24/15.02.30/camera_sync_pairs.csv",
+     "calibration_json": "res/2026.10.24/15.02.30/calibration.json",
+     "annotations_path": "res/2026.10.24/15.02.30/annotations/yolo.json",
+     "cfg_file": "mmWaveStudio/mobile_collection/rng40_res0004_tx3_rx4.lua",
+     "sync_csv": "res/2026.10.24/15.02.30/sync_pairs.csv",
+     "sync_summary": "res/2026.10.24/15.02.30/sync_summary.json",
+     "cache_dir": "res/2026.10.24/15.02.30/viz_cache"
+    }
+   }
   }
+ }
 }

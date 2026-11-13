@@ -1,158 +1,102 @@
-# Radar/Lidar Time Sync
+# Multi-Sensor 3D Perception Pipeline
 
-This folder contains scripts to synchronize:
-- TI AWR2944 + DCA1000 radar capture (`.h5`, from `collect.py`)
-- Ouster OS0 lidar capture (`.pcap`)
+**Robust multi-sensor 3D perception via propagated spatial memory**, end to end on a mobile
+sensing rig: TI AWR2944 + DCA1000 radar · Ouster OS-0-128 lidar · Intel RealSense D435 camera.
+From raw captures to time-synchronized pairs, extrinsic calibration, auto-generated 3D labels,
+three pretrained detectors, late fusion with cost-aware sensor selection, and a world-frame
+temporal memory whose beliefs are small enough to transmit between agents over lossy channels.
 
-## Layout
+```mermaid
+flowchart LR
+  subgraph RAW[0 · capture]
+    R[radar .h5]
+    L[lidar .pcap]
+    C[camera .bag]
+  end
+  SYNC[1 · time sync]
+  CAL[2 · calibration]
+  LAB[3 · labeling + benchmark]
+  DET[4 · three frozen detectors]
+  FUSE[5 · late fusion + sensor selection]
+  MEM[6 · temporal spatial memory]
+  COMM[7 · belief codec + lossy channel]
 
-Pipeline (`src/`):
-- `sync_radar_lidar.py` — build nearest-neighbor radar↔lidar frame matches →
-  `sync_pairs.csv` + `sync_summary.json`.
-- `sync_camera_pairs.py` — attach camera frames onto `sync_pairs.csv` rows.
-- `make_video.py` — data-inspection MP4: radar BEV + lidar BEV + camera per matched pair.
-- `lib/` — shared library modules, imported as `lib.<module>`:
-  - `dataset_config.py`, `sync_utils.py` — dataset profiles + timestamp/sync helpers.
-  - `camera_io.py` — Intel RealSense D435 ROS bag reader (RGB + depth).
-  - `lidar_io.py` — Ouster OS0 pcap/SDK reader.
-  - `bev_render.py` — radar range-azimuth→BEV + lidar `LidarScanReader` + frame cache.
-  - `sync_annotations.py` — top-down box annotation overlay/IO.
-- `calibration/` — camera/radar → lidar extrinsic calibration tools.
-- `camera_projection/` — depth → top-down object-proposal annotations.
-
-Diagnostics (`dev/`):
-- `extract_timestamps.py` — dump radar/lidar timestamp arrays for sanity checks.
-- `visualize_sync.py` — timing/sync-quality plots (timelines, index mapping, delta_ms).
-- `{camera,lidar,radar}_frame_testbench.ipynb` — interactive per-frame viewers.
-
-`datasets.json`, `res/`, `data/` stay at the folder root. Config (`datasets.json`)
-and outputs (`res/`) resolve relative to this `code/sync/` directory regardless of
-where the scripts live. Radar DSP (`utils.parse_config`, `utils.capon`, `utils.cfar`)
-is shared from `code/utils/`.
-
-## Basic Usage
-
-```bash
-python code/sync/src/sync_radar_lidar.py \
-  --radar_h5 /path/to/radar.h5 \
-  --lidar_pcap /path/to/lidar.pcap \
-  --fit_offset \
-  --output_csv ./code/sync/sync_pairs.csv \
-  --output_json ./code/sync/sync_summary.json
+  R --> SYNC
+  L --> SYNC
+  C --> SYNC
+  SYNC --> CAL --> LAB --> DET --> FUSE
+  DET --> MEM --> COMM
+  CAL --> MEM
 ```
 
-## Visualize Sync Results
+(Static copy: `pipeline_diagram.svg`.)
 
-```bash
-python code/sync/dev/visualize_sync.py \
-  --sync_csv ./code/sync/sync_pairs.csv \
-  --radar_h5 /path/to/radar.h5 \
-  --lidar_pcap /path/to/lidar.pcap \
-  --estimated_offset_s 0.0 \
-  --out_png ./code/sync/sync_visualization.png
-```
+| stage | what it does | details |
+|---|---|---|
+| 1 · time sync | nearest-neighbor radar↔lidar frame matching, camera attached by timestamp | [src/README.md](src/README.md) |
+| 2 · calibration | camera↔lidar (range-view picks → PnP → ICP refine) and radar↔lidar extrinsics, with validation tools | [src/calibration/README.md](src/calibration/README.md) |
+| 3 · labeling + benchmark | YOLO 2D → lidar frustum-raised 3D boxes, manual editor, benchmark splits + standalone packs | [src/camera_projection/README.md](src/camera_projection/README.md) |
+| 4 · detectors | camera (frozen DETR + trained heads), lidar & radar (voxel center-heads), condition-balanced training | [src/fusion/late_fusion/README.md](src/fusion/late_fusion/README.md) |
+| 5 · fusion + selection | single/equal/learned-fusion ladder; cost-aware sensor-subset selection | [src/fusion/late_fusion/README.md](src/fusion/late_fusion/README.md), [src/fusion/rl_modality/README.md](src/fusion/rl_modality/README.md) |
+| 6 · spatial memory | per-window lidar odometry (deskew, keyframes), world-frame belief bank, radar-certified camera writes | [src/fusion/late_fusion/README.md](src/fusion/late_fusion/README.md) |
+| 7 · belief communication | 16-bit explicit beliefs; learned codes as noise-tolerant channel codes (BSC / 16-QAM / AWGN) | [src/fusion/late_fusion/README.md](src/fusion/late_fusion/README.md) |
 
-Tip: if `sync_summary.json` reports a non-zero `estimated_lidar_to_radar_offset_s`,
-pass that value to `--estimated_offset_s` for accurate aligned timeline display.
+Raw data lives in `data/` (never deleted), per-capture derived outputs in `res/`,
+dataset profiles in `datasets.json`, diagnostics and one-off builders in `dev/`.
 
-This command saves a **single summary PNG** that already includes **all matched pairs**.
+---
 
-To export one PNG per synchronized pair:
+## The pipeline, shown
 
-```bash
-python code/sync/dev/visualize_sync.py \
-  --sync_csv ./code/sync/sync_pairs.csv \
-  --radar_h5 /path/to/radar.h5 \
-  --lidar_pcap /path/to/lidar.pcap \
-  --estimated_offset_s 0.0 \
-  --export_all_pairs_dir ./code/sync/pair_inspect \
-  --export_max_pairs -1 \
-  --no_show
-```
+### Labeling on synchronized, calibrated frames (verifies stages 1–3)
 
-To create an MP4 from all exported pair PNGs in the same run:
+A minute of the labeling run: YOLO detections on the camera (left), the same objects
+frustum-raised to oriented 3D boxes on the lidar BEV, and radar returns collected inside those
+boxes (right). The raised boxes land on the correct lidar clusters and radar returns only if
+time-sync *and* both extrinsics are right — so the labeling video doubles as a continuous
+end-to-end check of stages 1–3:
 
-```bash
-python code/sync/dev/visualize_sync.py \
-  --sync_csv ./code/sync/sync_pairs.csv \
-  --radar_h5 /path/to/radar.h5 \
-  --lidar_pcap /path/to/lidar.pcap \
-  --estimated_offset_s 0.0 \
-  --export_all_pairs_dir ./code/sync/pair_inspect \
-  --export_max_pairs -1 \
-  --out_video ./code/sync/pair_inspect.mp4 \
-  --video_fps 12 \
-  --no_show
-```
+![labeling run, 1-min clip](docs/img/labeling_clip.gif)
 
-Note: video export uses `ffmpeg` from your system `PATH`.
+(Full video: `res/2026.05.08/17-34-27/label_video_prop_cam_s1.mp4`; single-frame example with
+prediction overlays: `docs/img/labeling_2d.jpg`.)
 
-## Data video (range-azimuth + lidar BEV)
+### Fused BEV detection (stages 4–5)
 
-Requires Ouster SDK 0.16+ (`pip install ouster-sdk`). Uses `ouster.sdk.core` and
-`ouster.sdk.pcap` (not the old `from ouster import client, pcap`). Metadata JSON is
-optional if it sits beside the `.pcap` with a matching prefix.
+Benchmark scenes in BEV (cycling): raw lidar points (grey), GT (red dashed), per-sensor
+proposals (camera amber · lidar green · radar blue), fused output (teal, with scores):
 
-```bash
-python code/sync/src/make_video.py \
-  --sync_csv ./code/sync/res/sync_pairs.csv \
-  --sync_summary ./code/sync/res/sync_summary.json \
-  --radar_h5 /path/to/radar.h5 \
-  --lidar_pcap /path/to/lidar.pcap \
-  --lidar_metadata /path/to/ouster_metadata.json \
-  --cfg_file ./code/mmWaveStudio/server.lua \
-  --out_video ./code/sync/res/sync_data.mp4 \
-  --video_fps 10 \
-  --stride 2
-```
+![fused BEV scenes](docs/img/fusion_bev.gif)
 
-**Important:** `radar_idx` in `sync_pairs.csv` is a **sync-time block index** (small
-`packets_per_frame` used during sync), **not** the ADC frame index from `server.lua`.
-The video script maps via `radar_t` timestamps by default (`--radar_load_mode timestamp`).
-If you see many "Skip pair" messages, pass `--sync_summary` (or re-run sync to add
-`radar_packets_per_frame` to the JSON).
+### Temporal spatial memory on a moving window (stage 6)
 
-- `--stride 2` uses every 2nd matched pair (faster preview).
-- `--max_frames 500` caps video length.
-- `--show_radar_bev` shows radar BEV instead of range-azimuth on the left panel.
+Per-window lidar odometry (point-to-line ICP + deskew through a 138° turn; landmark drift
+0.13 m) anchors a world-frame belief bank: detections are written in, and read back where the
+camera cannot see. The full window below: warm-up writes during the turn, then the camera
+wedge (orange) swings away while green memory diamonds hold the road it used to face — green
+rings mark blind GT recovered from memory up to 22 s after last sight. Two limited-FOV sensors
++ memory reach WORLD recall 0.74 vs 0.64 for a continuous 360° lidar:
 
-## Optional: Ouster SDK Accurate Scan Timestamps
+![memory window, full clip](docs/img/memory_clip.gif)
 
-If you have Ouster metadata `.json` and SDK installed, pass:
+Source clips and stills: `win_*/odometry_viz/` (V7 odometry flipbook, M7/M8 memory flipbooks).
 
-```bash
---lidar_metadata /path/to/ouster_metadata.json
-```
+### Belief communication (stage 7)
 
-Then lidar frame timestamps use native scan timestamps instead of packet-block fallback.
+Bank entries serialize to **16 bits per object** with no metric loss; under noisy channels,
+latent codes trained with the channel in the loop hold flat (BLIND 0.69–0.77) where
+explicit + Hamming cliffs (0.15–0.63) — tables and the full ablation in
+[src/fusion/late_fusion/README.md](src/fusion/late_fusion/README.md).
 
-## Notes
+---
 
-- By default, fallback lidar parsing filters UDP port `7502` (OS0 lidar data).
-- If your port differs, set `--lidar_udp_port`.
-- If your capture has no clean packet-per-frame ratio, tune:
-  - `--radar_packets_per_frame`
-  - `--lidar_packets_per_frame`
-- `--fit_offset` is recommended when radar/lidar logs start at slightly different times.
+## Gotchas that cost real debugging time
 
-## Camera (Intel RealSense R435)
-
-Camera recordings are ROS bag files under `{data_root}/camera/*.bag` with topics:
-
-- `/device_0/sensor_1/Color_0/image/data` (rgb8)
-- `/device_0/sensor_0/Depth_0/image/data` (16UC1, mm)
-
-Requires: `pip install rosbags`
-
-After radar/lidar sync, attach camera frames (uses image header timestamps vs `radar_t`):
-
-```bash
-cd code
-python3 ./sync/src/sync_camera_pairs.py -d 2026.05.10/18-05-08 --rebuild_index
-```
-
-This adds `camera_color_idx`, `camera_depth_idx`, `camera_t`, `camera_delta_ms` to
-`sync_pairs.csv` and caches timestamps in `camera_index.npz`. First bag scan on USB
-can take several minutes.
-
-Interactive viewer: open `sync/dev/camera_frame_testbench.ipynb`.
+- **Lidar pcap dropouts are hidden by the sequential scan index** — only timestamps reveal them
+  (1.25–2.84 s gaps observed, truncated scans). Anything kinematic must use real Δt.
+- `radar_idx` in `sync_pairs.csv` is a sync-time block index, not the ADC frame index — map via
+  `radar_t` (details in [src/README.md](src/README.md)).
+- Radar range scale: bandwidth must use the ADC sampling window (`range_res ≈ 0.0489 m`,
+  max range 25 m); polar→BEV convention is self-calibrated per sequence.
+- Camera `.bag` streaming from cloud-synced folders stalls — extract frames to local disk first.
+- cv2/GStreamer cannot write MP4 here — render JPGs, assemble with `ffmpeg`, write locally.

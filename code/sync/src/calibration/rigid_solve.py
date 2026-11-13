@@ -103,6 +103,272 @@ def umeyama_2d(source: np.ndarray, target: np.ndarray) -> RigidFit:
     return _fit(source, target, 2)
 
 
+def fit_yaw_deg(fit: RigidFit) -> float:
+    """Planar yaw (deg) of a 2D RigidFit's rotation."""
+    return float(np.degrees(np.arctan2(fit.rotation[1, 0], fit.rotation[0, 0])))
+
+
+def yaw_stability_2d(solver, source, target, *, n_boot: int = 2000, seed: int = 0):
+    """Bootstrap + leave-one-out spread of the fitted yaw (deg).
+
+    ``solver`` is any ``(src, tgt) -> RigidFit`` (e.g. ``umeyama_2d``). Returns a dict
+    with the point estimate and its empirical spread so a caller can judge whether the
+    yaw is actually constrained by the data (tight spread) or not (wide/railed). Yaw is
+    the azimuth-derived quantity, so for sparse mmWave correspondences its uncertainty is
+    what decides whether a solve is trustworthy.
+    """
+    source = np.asarray(source, dtype=np.float64).reshape(-1, 2)
+    target = np.asarray(target, dtype=np.float64).reshape(-1, 2)
+    n = source.shape[0]
+    full = fit_yaw_deg(solver(source, target))
+    loo = np.array(
+        [fit_yaw_deg(solver(np.delete(source, i, 0), np.delete(target, i, 0)))
+         for i in range(n)]
+    ) if n >= 3 else np.array([full])
+    rgen = np.random.default_rng(seed)
+    boot = []
+    if n >= 3:
+        for _ in range(int(n_boot)):
+            idx = rgen.integers(0, n, n)
+            try:
+                boot.append(fit_yaw_deg(solver(source[idx], target[idx])))
+            except Exception:  # noqa: BLE001 - degenerate resample, skip
+                pass
+    boot = np.array(boot) if boot else np.array([full])
+    return {
+        "yaw_deg": full,
+        "boot_std": float(np.std(boot)),
+        "boot_p16": float(np.percentile(boot, 16)),
+        "boot_p84": float(np.percentile(boot, 84)),
+        "loo": loo,
+        "loo_std": float(np.std(loo)),
+        "loo_min": float(loo.min()),
+        "loo_max": float(loo.max()),
+    }
+
+
+def weighted_umeyama_2d(
+    source: np.ndarray,
+    target: np.ndarray,
+    *,
+    sigma_ratio: float = 10.0,
+    loss: str = "soft_l1",
+) -> RigidFit:
+    """Planar fit that trusts the radar SOURCE point's range >> its azimuth.
+
+    A mmWave radar measures range precisely but azimuth (cross-range) coarsely, so a
+    correspondence's ``source`` point has small radial uncertainty and large tangential
+    uncertainty. This solves (yaw, tx, ty) minimizing the residual with the tangential
+    (azimuth) component down-weighted by ``sigma_ratio`` relative to the radial (range)
+    component -- so azimuth noise no longer poisons the fit the way plain Umeyama does.
+
+    ``loss`` is a scipy.least_squares robust loss ('soft_l1' by default) for outlier
+    tolerance. Residuals/RMS in the result are the plain isotropic errors (meters), for
+    comparability with ``umeyama_2d``.
+    """
+    from scipy.optimize import least_squares
+
+    source = np.asarray(source, dtype=np.float64).reshape(-1, 2)
+    target = np.asarray(target, dtype=np.float64).reshape(-1, 2)
+    if source.shape != target.shape:
+        raise ValueError(f"source {source.shape} and target {target.shape} must match")
+    n = source.shape[0]
+    if n < 2:
+        raise ValueError(f"Need >= 2 correspondences, got {n}.")
+
+    seed = umeyama_2d(source, target)
+    yaw0 = float(np.arctan2(seed.rotation[1, 0], seed.rotation[0, 0]))
+    rng = np.linalg.norm(source, axis=1)
+    rng[rng < 1e-6] = 1e-6
+    u = source / rng[:, None]                       # radial unit (radar frame)
+    v = np.column_stack([-u[:, 1], u[:, 0]])        # tangential (azimuth) unit
+    sigma_t = max(float(sigma_ratio), 1e-6)
+
+    def residual(params):
+        yaw, tx, ty = params
+        c, s = np.cos(yaw), np.sin(yaw)
+        rot = np.array([[c, -s], [s, c]])
+        e = source @ rot.T + np.array([tx, ty]) - target      # (N, 2) target frame
+        e_rad = np.sum(e * (u @ rot.T), axis=1)               # along source range dir
+        e_tan = np.sum(e * (v @ rot.T), axis=1)               # along source azimuth dir
+        return np.concatenate([e_rad, e_tan / sigma_t])
+
+    sol = least_squares(
+        residual, np.array([yaw0, seed.translation[0], seed.translation[1]]), loss=loss
+    )
+    yaw, tx, ty = sol.x
+    c, s = np.cos(yaw), np.sin(yaw)
+    rot = np.array([[c, -s], [s, c]])
+    trans = np.array([tx, ty])
+    residuals = np.linalg.norm(source @ rot.T + trans - target, axis=1)
+    transform = np.eye(3, dtype=np.float64)
+    transform[:2, :2] = rot
+    transform[:2, 2] = trans
+    return RigidFit(
+        transform=transform,
+        rotation=rot,
+        translation=trans,
+        residuals=residuals,
+        rms=float(np.sqrt(np.mean(residuals**2))),
+        max_error=float(residuals.max()),
+        n_points=n,
+    )
+
+
+def _weighted_translation(source, target, u, v, yaw, w_rad, w_tan):
+    """Closed-form range-weighted translation for a FIXED yaw. Returns (t, cost)."""
+    c, s = np.cos(yaw), np.sin(yaw)
+    rot = np.array([[c, -s], [s, c]])
+    rad = u @ rot.T
+    tan = v @ rot.T
+    sp = source @ rot.T
+    d = target - sp
+    A = w_rad * (rad.T @ rad) + w_tan * (tan.T @ tan)
+    bb = (w_rad * (rad * np.sum(rad * d, axis=1)[:, None]).sum(0)
+          + w_tan * (tan * np.sum(tan * d, axis=1)[:, None]).sum(0))
+    t = np.linalg.solve(A, bb)
+    e = sp + t - target
+    cost = float(np.sum(w_rad * np.sum(e * rad, axis=1) ** 2
+                        + w_tan * np.sum(e * tan, axis=1) ** 2))
+    return t, cost
+
+
+def yaw_bruteforce_2d(
+    source: np.ndarray,
+    target: np.ndarray,
+    *,
+    yaw_lo_deg: float,
+    yaw_hi_deg: float,
+    step_deg: float = 0.25,
+    sigma_ratio: float = 10.0,
+    return_curve: bool = False,
+):
+    """Bounded yaw brute-force with a closed-form range-weighted translation per yaw.
+
+    mmWave yaw is the azimuth-derived quantity, so a free fit can run to implausible
+    angles. Here yaw is swept over a physically-plausible ``[yaw_lo_deg, yaw_hi_deg]``;
+    for each candidate the optimal translation is solved in closed form (range trusted
+    >> azimuth via ``sigma_ratio``), and the lowest-cost yaw wins. The cost-vs-yaw curve
+    (returned with ``return_curve``) shows how sharply yaw is actually constrained.
+    """
+    source = np.asarray(source, dtype=np.float64).reshape(-1, 2)
+    target = np.asarray(target, dtype=np.float64).reshape(-1, 2)
+    n = source.shape[0]
+    rng = np.linalg.norm(source, axis=1)
+    rng[rng < 1e-6] = 1e-6
+    u = source / rng[:, None]
+    v = np.column_stack([-u[:, 1], u[:, 0]])
+    w_rad, w_tan = 1.0, 1.0 / max(float(sigma_ratio), 1e-6) ** 2
+
+    yaws = np.deg2rad(np.arange(yaw_lo_deg, yaw_hi_deg + 1e-9, step_deg))
+    costs = np.empty(yaws.size)
+    ts = np.empty((yaws.size, 2))
+    for k, yaw in enumerate(yaws):
+        ts[k], costs[k] = _weighted_translation(source, target, u, v, yaw, w_rad, w_tan)
+    k = int(np.argmin(costs))
+    yaw, t = float(yaws[k]), ts[k]
+
+    c, s = np.cos(yaw), np.sin(yaw)
+    rot = np.array([[c, -s], [s, c]])
+    residuals = np.linalg.norm(source @ rot.T + t - target, axis=1)
+    transform = np.eye(3, dtype=np.float64)
+    transform[:2, :2] = rot
+    transform[:2, 2] = t
+    fit = RigidFit(
+        transform=transform, rotation=rot, translation=t, residuals=residuals,
+        rms=float(np.sqrt(np.mean(residuals**2))), max_error=float(residuals.max()),
+        n_points=n,
+    )
+    if return_curve:
+        return fit, np.degrees(yaws), costs
+    return fit
+
+
+def _rot_x(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+
+
+def _rot_y(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+
+def _rot_z(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+
+# Nominal camera-optical (X right, Y down, Z fwd) -> lidar sensor (X fwd, Y left, Z up).
+IDEAL_CAM_TO_LIDAR = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], dtype=np.float64)
+
+
+def level_constrained_fit(
+    source: np.ndarray,
+    target: np.ndarray,
+    *,
+    ideal_rotation: np.ndarray = IDEAL_CAM_TO_LIDAR,
+    max_pitch_deg: float = 25.0,
+    max_yaw_deg: float = 45.0,
+) -> RigidFit:
+    """Rigid fit with ROLL (rotation about the lidar forward axis) locked to zero.
+
+    When both sensors are physically level, the camera->lidar rotation is
+    ``Rz(yaw) @ Ry(pitch) @ ideal`` — there is no roll about forward. A full
+    Umeyama solve, given correspondences clustered near one height plane, will
+    happily spend a spurious ~10-15 deg roll to shave a little RMS off noise.
+    Locking roll removes that failure mode; only pitch, yaw and translation are
+    free. Solved by a coarse-to-fine grid over (yaw, pitch), optimal translation
+    per candidate.
+    """
+    source = np.asarray(source, dtype=np.float64).reshape(-1, 3)
+    target = np.asarray(target, dtype=np.float64).reshape(-1, 3)
+    if source.shape != target.shape:
+        raise ValueError(f"source {source.shape} and target {target.shape} must match")
+    n = source.shape[0]
+    if n < 2:
+        raise ValueError(f"Need >= 2 correspondences, got {n}.")
+
+    def eval_rt(yaw: float, pitch: float):
+        rot = _rot_z(yaw) @ _rot_y(pitch) @ ideal_rotation
+        trans = (target - source @ rot.T).mean(axis=0)
+        res = np.linalg.norm(source @ rot.T + trans - target, axis=1)
+        return rot, trans, res, float(np.sqrt(np.mean(res**2)))
+
+    best = None
+    # coarse grid then two refinement passes around the current best
+    yaw_lo, yaw_hi = -np.radians(max_yaw_deg), np.radians(max_yaw_deg)
+    pit_lo, pit_hi = -np.radians(max_pitch_deg), np.radians(max_pitch_deg)
+    step = np.radians(1.0)
+    for _ in range(3):
+        yaws = np.arange(yaw_lo, yaw_hi + step, step)
+        pits = np.arange(pit_lo, pit_hi + step, step)
+        for y in yaws:
+            for p in pits:
+                rot, trans, res, rms = eval_rt(y, p)
+                if best is None or rms < best[0]:
+                    best = (rms, y, p, rot, trans, res)
+        # zoom in around the best for the next pass
+        _, by, bp, *_ = best
+        yaw_lo, yaw_hi = by - step, by + step
+        pit_lo, pit_hi = bp - step, bp + step
+        step /= 20.0
+
+    rms, _y, _p, rot, trans, res = best
+    transform = np.eye(4)
+    transform[:3, :3] = rot
+    transform[:3, 3] = trans
+    return RigidFit(
+        transform=transform,
+        rotation=rot,
+        translation=trans,
+        residuals=res,
+        rms=float(rms),
+        max_error=float(res.max()),
+        n_points=n,
+    )
+
+
 def fit_with_rejection(solve_fn, source, target, *, max_residual: float, min_points: int):
     """Iteratively drop the single worst correspondence while its residual exceeds
     ``max_residual`` (meters), refitting each time. Returns (fit, keep_mask).

@@ -43,8 +43,10 @@ def build_argparser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--calibration_json", default=None, help="Calibration JSON (or via --dataset).")
-    p.add_argument("--camera_correspondences", default=None, help="camera_lidar_correspondences.json")
-    p.add_argument("--radar_correspondences", default=None, help="radar_lidar_correspondences.json")
+    p.add_argument("--camera_correspondences", default=None,
+                   help="Default: <calib dir>/correspondences/camera_lidar.json")
+    p.add_argument("--radar_correspondences", default=None,
+                   help="Default: <calib dir>/correspondences/radar_lidar_{auto,handpicked}.json")
     p.add_argument(
         "--max_translation_m",
         type=float,
@@ -105,15 +107,24 @@ def main() -> int:
     with open(calib_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
-    missing = [k for k in ("camera_to_lidar", "radar_to_lidar") if k not in payload]
+    if str(_CALIB_DIR) not in sys.path:
+        sys.path.insert(0, str(_CALIB_DIR))
+    from extrinsic_io import get_extrinsic, has_extrinsic
+
+    missing = [
+        k for k in ("camera_to_lidar", "radar_to_lidar")
+        if not has_extrinsic(payload, k)
+    ]
     if missing:
         raise SystemExit(
             f"{calib_path} is missing {missing}. Solve both with calibrate_camera_lidar.py "
             "and calibrate_radar_lidar.py first."
         )
 
-    cam2lid = np.asarray(payload["camera_to_lidar"], dtype=np.float64)
-    rad2lid = np.asarray(payload["radar_to_lidar"], dtype=np.float64)
+    cam2lid, _cam_src = get_extrinsic(payload, "camera_to_lidar")
+    # Prefer an auto-solved radar refinement (radar_to_lidar_auto) over the hand-picked one.
+    rad2lid, rad_src = get_extrinsic(payload, "radar_to_lidar")
+    print(f"Deriving camera_to_radar from '{_cam_src}' and '{rad_src}'.")
     cam2rad = np.linalg.inv(rad2lid) @ cam2lid
 
     print("=== transforms ===")
@@ -129,12 +140,15 @@ def main() -> int:
 
     if not _solved(payload, "camera_to_lidar"):
         warns.append("camera_to_lidar is not marked solved — run calibrate_camera_lidar.py.")
-    if not _solved(payload, "radar_to_lidar"):
-        warns.append("radar_to_lidar is not marked solved — run calibrate_radar_lidar.py.")
+    if not _solved(payload, rad_src):
+        warns.append(f"{rad_src} is not marked solved — run calibrate_radar_lidar.py.")
 
     # --- residual validation from saved correspondences ---
-    cam_corr = Path(args.camera_correspondences or calib_path.parent / "camera_lidar_correspondences.json")
-    rad_corr = Path(args.radar_correspondences or calib_path.parent / "radar_lidar_correspondences.json")
+    _corr_dir = calib_path.parent / "correspondences"
+    cam_corr = Path(args.camera_correspondences or _corr_dir / "camera_lidar.json")
+    _rad_corr_default = ("radar_lidar_auto.json"
+                         if rad_src.endswith("_auto") else "radar_lidar_handpicked.json")
+    rad_corr = Path(args.radar_correspondences or _corr_dir / _rad_corr_default)
     print("\n=== fit residuals (stored matrix vs saved correspondences) ===")
     cam_rms = _residual_from_correspondences(cam2lid, cam_corr, dim=3)
     rad_rms = _residual_from_correspondences(rad2lid, rad_corr, dim=2)
@@ -156,9 +170,10 @@ def main() -> int:
     payload["radar_to_camera"] = np.linalg.inv(cam2rad).tolist()
     payload["camera_to_radar_meta"] = {
         "derived": True,
-        "formula": "inv(radar_to_lidar) @ camera_to_lidar",
+        "formula": f"inv({rad_src}) @ camera_to_lidar",
+        "radar_source": rad_src,
         "camera_to_lidar_solved": _solved(payload, "camera_to_lidar"),
-        "radar_to_lidar_solved": _solved(payload, "radar_to_lidar"),
+        "radar_to_lidar_solved": _solved(payload, rad_src),
         "written": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     with open(calib_path, "w", encoding="utf-8") as f:

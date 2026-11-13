@@ -122,12 +122,15 @@ def write_extrinsic(
     max_error_m: float,
     correspondences_path: Optional[str | Path] = None,
     note: str = "",
+    method: str = "hand-picked correspondences + Umeyama rigid fit",
 ) -> None:
     """Merge a 4x4 extrinsic under ``key`` into an existing calibration JSON.
 
     Preserves every other field (intrinsics, depth_scale, other extrinsics) and
     records provenance under ``<key>_meta`` so a placeholder is never silently
-    trusted again.
+    trusted again. Auto-solved refinements should use a distinct ``key`` (e.g.
+    ``radar_to_lidar_auto``) and a matching ``method`` so the hand-picked result is
+    kept alongside it; ``get_extrinsic`` then prefers the auto one at read time.
     """
     path = Path(calibration_json)
     payload: dict = {}
@@ -141,7 +144,7 @@ def write_extrinsic(
     payload[key] = np.asarray(matrix, dtype=np.float64).tolist()
     payload[f"{key}_meta"] = {
         "solved": True,
-        "method": "hand-picked correspondences + Umeyama rigid fit",
+        "method": method,
         "n_correspondences": int(n_points),
         "rms_m": float(rms_m),
         "max_error_m": float(max_error_m),
@@ -153,3 +156,26 @@ def write_extrinsic(
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     print(f"Wrote {key} (+{key}_meta) to {path}")
+
+
+def get_extrinsic(calib: dict, base_key: str, *, prefer_auto: bool = True):
+    """Resolve an extrinsic matrix, preferring an auto-solved refinement.
+
+    Returns ``(matrix 4x4 np.ndarray, source_key)``. An auto solve (e.g.
+    ``--auto_movers``) writes ``<base_key>_auto`` next to the hand-picked
+    ``<base_key>``; consumers call this to use the auto result when present and fall
+    back to the hand-picked one otherwise. Raises ``KeyError`` if neither exists.
+    """
+    auto_key = f"{base_key}_auto"
+    if prefer_auto and calib.get(auto_key) is not None:
+        return np.asarray(calib[auto_key], dtype=np.float64), auto_key
+    if calib.get(base_key) is not None:
+        return np.asarray(calib[base_key], dtype=np.float64), base_key
+    raise KeyError(f"No {base_key} (or {auto_key}) in calibration.")
+
+
+def has_extrinsic(calib: dict, base_key: str, *, prefer_auto: bool = True) -> bool:
+    """True if ``base_key`` (or its ``_auto`` refinement) is present."""
+    if prefer_auto and calib.get(f"{base_key}_auto") is not None:
+        return True
+    return calib.get(base_key) is not None
